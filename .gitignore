@@ -1,0 +1,12 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+*.ilk
+*.exp
+/Compiled X-Tensions/*.lib
+*.pdb
+/.vs
+/MSVC 2019/.vs/
+**/Release/
+**/Debug/
