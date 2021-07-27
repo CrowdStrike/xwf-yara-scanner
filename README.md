@@ -18,7 +18,7 @@ There are many benefits to running YARA within X-Ways, versus running YARA withi
 _Note: The compiled library for YARA V4.1.0 is included_
 
 #  How to Install
-Assuming that X-Ways Forensics is installed and a setup correctly, simply download the [compiled DLL](Compiled X-Tensions) and copy it into your *x64* folder within the X-Ways Forensics install folder.
+Assuming that X-Ways Forensics is installed and a setup correctly, simply download the [compiled DLL](https://github.com/CrowdStrike/xwf-yara-scanner/tree/main/Compiled%20X-Tensions) and copy it into your *x64* folder within the X-Ways Forensics install folder.
 
 #  How to Use
 The X-Tension can be executed via the X-Ways Forensics GUI or via the X-Ways Forensics command-line. This readme will focus on the GUI method.
