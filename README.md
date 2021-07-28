@@ -12,7 +12,7 @@ There are many benefits to running YARA within X-Ways, versus running YARA via t
 
 #  Requirements
 
-* A license for X-Ways Forensics (version 18.5 or later)
+* A license for X-Ways Forensics (version v19.9 SR-7 and later)
 * A set of YARA rules
 
 _Note: The compiled library for YARA V4.1.0 is included_
