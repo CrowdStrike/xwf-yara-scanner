@@ -4,7 +4,7 @@ This [X-Ways Forensics](http://www.x-ways.net/forensics/) [X-Tension](http://www
 
 _Note: This is an open source project, not a formal CrowdStrike product._
 
-There are many benefits to running YARA within X-Ways, versus running YARA within it's own command-line interface.
+There are many benefits to running YARA within X-Ways, versus running YARA via the command-line interface.
 * No need to mount the target media, the X-Tension will read each file within the case snapshot into memory and be scanned there. No files are written to disk.
 * Allows the user to use the powerful filters within X-Ways to limit the scope of the YARA scan.
 * Because the X-Tension uses the power of X-Ways, YARA will scan all files within the current snapshot. This includes carved files, decompressed archives, files within archives within archives etc. 
@@ -12,13 +12,13 @@ There are many benefits to running YARA within X-Ways, versus running YARA withi
 
 #  Requirements
 
-* A license for X-Ways Forensics (version 18.5 or later)
+* A license for X-Ways Forensics (version v19.9 SR-7 and later)
 * A set of YARA rules
 
 _Note: The compiled library for YARA V4.1.0 is included_
 
 #  How to Install
-Assuming that X-Ways Forensics is installed and a setup correctly, simply download the [compiled DLL](Compiled X-Tensions) and copy it into your *x64* folder within the X-Ways Forensics install folder.
+Assuming that X-Ways Forensics is installed and setup correctly, simply download the [compiled DLL](https://github.com/CrowdStrike/xwf-yara-scanner/tree/main/Compiled%20X-Tensions) and copy it into your *x64* folder within the X-Ways Forensics install folder.
 
 #  How to Use
 The X-Tension can be executed via the X-Ways Forensics GUI or via the X-Ways Forensics command-line. This readme will focus on the GUI method.
@@ -27,30 +27,30 @@ Within the GUI, there are two ways to execute the X-Tension; via the Refine Volu
 
 **If any of the YARA rules fail to compile**, an error will be displayed within the X-Ways Messages window showing which line the error occurred on, and the YARA error message. Fix these errors within the YARA rule and try again. A count of YARA warnings will be displayed via the X-Ways Messages window, but the exact details of these warnings are not provided by the X-Tension. If you need to see these, run YARA v4.1.0 command-line interface using the same rule file. 
 
-_Note: There is a risk that a valid YARA hit is missed if the scanned data resides across two chunk boundaries. If this is a problem, increase the buffer size or copy the file out of X-Ways and scan using the YARA command-line interface_
+_Note: There is a risk that a valid YARA hit is missed if the scanned data resides across two chunk/buffer boundaries. If this is a problem, increase the buffer size or copy the file out of X-Ways and scan using the YARA command-line interface._
 
 | Method -> | RVS | DBC |
 |--|--|--|
 | Multi-threaded | Yes | No |
 | Prompt for maximum file size | Yes | No |
 | Prompt for scan buffer size | Yes* | Yes |
+
 \* Only if the maximum file size entered by the user is larger than 100MB. If the maximum file size is smaller than 100MB, it uses 100MB as the buffer size.
 
 ###  Refine Volume Snapshot
 Within the GUI, once you have created or opened a previously existing case, go to Specialist -> Refine Volume Snapshot. Then check the option "Run X-Tensions" and click the three dots that appear. Within the menu that pops up, click on the plus (+) symbol and navigate to the **XT_Yara.dll** file downloaded from this repository, then press OK. You should see the message "[XT] YARA library initialised" displayed within the X-Ways Messages window. 
 
-You will then be prompted to specify the location of the YARA rules file. You can provide a relative path if the rule file is in the same location as the DLL, or alternatively provide an absolute path to the DLL. If the file does not exist, an error will be provided in the X-Ways Messages window. A message window will be displayed and you will then be asked to provide a maximum file size to scan, which is required. 25-50MB could be an adequate maximum size if you are only looking for malware samples or web shells for example.
+You will then be prompted to specify the location of the YARA rules file. You can provide a relative path if the rule file is in the same location as the DLL, or alternatively provide an absolute path to the DLL. If the file does not exist, an error will be provided in the X-Ways Messages window. An input window will be displayed and you will then be asked to provide a maximum file size to scan, which is required. 25-50MB could be an adequate maximum size if you are only looking for malware samples or web shells for example.
 
 If the user has selected a maximum file size of more than 100MB, a second user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads.
 
 ###  Directory Browser Context Menu
-Within the GUI, once you have created or opened a previously existing case, select the files you wish to scan and then right click one of them and select "Run X-Tensions...". You will then be prompted to specify the location of the YARA rules file. A user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads. 
+Within the GUI, once you have created or opened a previously existing case, select the file(s) you wish to scan and then right click one of them and select "Run X-Tensions...". You will then be prompted to specify the location of the YARA rules file. A user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads. 
 
 There is no prompt for maximum file size.
 
 #  How to Read the Output
-Files with YARA hits are added to the Report Table called "YARA Hits". The exact rules that hit are added per file within the "Comments" field inside X-Ways Forensics. 
-
+Files with YARA hits are added to the Report Table called "YARA Hits". The exact rules that hit are added per file, per line, within the "Comments" field inside X-Ways Forensics. 
 
 #  Troubleshooting
 There are a number of known bugs, which are outlined in this section.
