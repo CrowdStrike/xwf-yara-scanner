@@ -44,8 +44,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <yara/strutils.h>
 #include <yara/utils.h>
 
-#define todigit(x) \
-  ((x) >= 'A' && (x) <= 'F') ? ((uint8_t)(x - 'A' + 10)) : ((uint8_t)(x - '0'))
+#define todigit(x)                                        \
+  ((x) >= 'A' && (x) <= 'F') ? ((uint8_t) (x - 'A' + 10)) \
+                             : ((uint8_t) (x - '0'))
 
 int yr_parser_emit(
     yyscan_t yyscanner,
@@ -223,6 +224,64 @@ int yr_parser_emit_pushes_for_strings(
   {
     yr_compiler_set_error_extra_info(
         compiler, identifier) return ERROR_UNDEFINED_STRING;
+  }
+
+  return ERROR_SUCCESS;
+}
+
+// Emit OP_PUSH_RULE instructions for all rules whose identifier has given
+// prefix.
+int yr_parser_emit_pushes_for_rules(yyscan_t yyscanner, const char* prefix)
+{
+  YR_COMPILER* compiler = yyget_extra(yyscanner);
+
+  // Make sure the compiler is parsing a rule
+  assert(compiler->current_rule_idx != UINT32_MAX);
+
+  YR_RULE* rule;
+  int matching = 0;
+
+  YR_NAMESPACE* ns = (YR_NAMESPACE*) yr_arena_get_ptr(
+      compiler->arena,
+      YR_NAMESPACES_TABLE,
+      compiler->current_namespace_idx * sizeof(struct YR_NAMESPACE));
+
+  // Can't use yr_rules_foreach here as that requires the rules to have been
+  // finalized (inserting a NULL rule at the end). This is done when
+  // yr_compiler_get_rules() is called, which also inserts a HALT instruction
+  // into the current position in the code arena. Obviously we aren't done
+  // compiling the rules yet so inserting a HALT is a bad idea. To deal with
+  // this I'm manually walking all the currently compiled rules (up to the
+  // current rule index) and comparing identifiers to see if it is one we should
+  // use.
+  //
+  // Further, we have to get compiler->current_rule_idx before we start because
+  // if we emit an OP_PUSH_RULE
+  rule = yr_arena_get_ptr(compiler->arena, YR_RULES_TABLE, 0);
+
+  for (uint32_t i = 0; i <= compiler->current_rule_idx; i++)
+  {
+    // Is rule->identifier prefixed by prefix?
+    if (strncmp(prefix, rule->identifier, strlen(prefix)) == 0)
+    {
+      uint32_t rule_idx = yr_hash_table_lookup_uint32(
+          compiler->rules_table, rule->identifier, ns->name);
+
+      if (rule_idx != UINT32_MAX)
+      {
+        FAIL_ON_ERROR(yr_parser_emit_with_arg(
+            yyscanner, OP_PUSH_RULE, rule_idx, NULL, NULL));
+        matching++;
+      }
+    }
+
+    rule++;
+  }
+
+  if (matching == 0)
+  {
+    yr_compiler_set_error_extra_info(compiler, prefix);
+    return ERROR_UNDEFINED_IDENTIFIER;
   }
 
   return ERROR_SUCCESS;
@@ -519,6 +578,63 @@ static int _yr_parser_write_string(
   return result;
 }
 
+static int _yr_parser_check_string_modifiers(
+    yyscan_t yyscanner,
+    YR_MODIFIER modifier)
+{
+  YR_COMPILER* compiler = yyget_extra(yyscanner);
+
+  // xor and nocase together is not implemented.
+  if (modifier.flags & STRING_FLAGS_XOR &&
+      modifier.flags & STRING_FLAGS_NO_CASE)
+  {
+    yr_compiler_set_error_extra_info(
+        compiler, "invalid modifier combination: xor nocase");
+    return ERROR_INVALID_MODIFIER;
+  }
+
+  // base64 and nocase together is not implemented.
+  if (modifier.flags & STRING_FLAGS_NO_CASE &&
+      (modifier.flags & STRING_FLAGS_BASE64 ||
+       modifier.flags & STRING_FLAGS_BASE64_WIDE))
+  {
+    yr_compiler_set_error_extra_info(
+        compiler,
+        modifier.flags & STRING_FLAGS_BASE64
+            ? "invalid modifier combination: base64 nocase"
+            : "invalid modifier combination: base64wide nocase");
+    return ERROR_INVALID_MODIFIER;
+  }
+
+  // base64 and fullword together is not implemented.
+  if (modifier.flags & STRING_FLAGS_FULL_WORD &&
+      (modifier.flags & STRING_FLAGS_BASE64 ||
+       modifier.flags & STRING_FLAGS_BASE64_WIDE))
+  {
+    yr_compiler_set_error_extra_info(
+        compiler,
+        modifier.flags & STRING_FLAGS_BASE64
+            ? "invalid modifier combination: base64 fullword"
+            : "invalid modifier combination: base64wide fullword");
+    return ERROR_INVALID_MODIFIER;
+  }
+
+  // base64 and xor together is not implemented.
+  if (modifier.flags & STRING_FLAGS_XOR &&
+      (modifier.flags & STRING_FLAGS_BASE64 ||
+       modifier.flags & STRING_FLAGS_BASE64_WIDE))
+  {
+    yr_compiler_set_error_extra_info(
+        compiler,
+        modifier.flags & STRING_FLAGS_BASE64
+            ? "invalid modifier combination: base64 xor"
+            : "invalid modifier combination: base64wide xor");
+    return ERROR_INVALID_MODIFIER;
+  }
+
+  return ERROR_SUCCESS;
+}
+
 int yr_parser_reduce_string_declaration(
     yyscan_t yyscanner,
     YR_MODIFIER modifier,
@@ -552,33 +668,15 @@ int yr_parser_reduce_string_declaration(
   // The string was already defined, return an error.
   if (string_idx != UINT32_MAX)
   {
-    result = ERROR_DUPLICATED_STRING_IDENTIFIER;
-    yr_compiler_set_error_extra_info(compiler, identifier) goto _exit;
+    yr_compiler_set_error_extra_info(compiler, identifier);
+    return ERROR_DUPLICATED_STRING_IDENTIFIER;
   }
 
-  // Empty strings are not allowed
+  // Empty strings are not allowed.
   if (str->length == 0)
   {
-    result = ERROR_EMPTY_STRING;
-    yr_compiler_set_error_extra_info(compiler, identifier) goto _exit;
-  }
-
-  // If string identifier is $ this is an anonymous string, if not add the
-  // identifier to strings_table.
-  if (strcmp(identifier, "$") == 0)
-  {
-    modifier.flags |= STRING_FLAGS_ANONYMOUS;
-  }
-  else
-  {
-    result = yr_hash_table_add_uint32(
-        compiler->strings_table,
-        identifier,
-        NULL,
-        compiler->current_string_idx);
-
-    if (result != ERROR_SUCCESS)
-      goto _exit;
+    yr_compiler_set_error_extra_info(compiler, identifier);
+    return ERROR_EMPTY_STRING;
   }
 
   if (str->flags & SIZED_STRING_FLAGS_NO_CASE)
@@ -590,54 +688,6 @@ int yr_parser_reduce_string_declaration(
   // Hex strings are always handled as DOT_ALL regexps.
   if (modifier.flags & STRING_FLAGS_HEXADECIMAL)
     modifier.flags |= STRING_FLAGS_DOT_ALL;
-
-  // xor and nocase together is not implemented.
-  if (modifier.flags & STRING_FLAGS_XOR &&
-      modifier.flags & STRING_FLAGS_NO_CASE)
-  {
-    result = ERROR_INVALID_MODIFIER;
-    yr_compiler_set_error_extra_info(
-        compiler, "invalid modifier combination: xor nocase") goto _exit;
-  }
-
-  // base64 and nocase together is not implemented.
-  if (modifier.flags & STRING_FLAGS_NO_CASE &&
-      (modifier.flags & STRING_FLAGS_BASE64 ||
-       modifier.flags & STRING_FLAGS_BASE64_WIDE))
-  {
-    result = ERROR_INVALID_MODIFIER;
-    yr_compiler_set_error_extra_info(
-        compiler,
-        modifier.flags & STRING_FLAGS_BASE64
-            ? "invalid modifier combination: base64 nocase"
-            : "invalid modifier combination: base64wide nocase") goto _exit;
-  }
-
-  // base64 and fullword together is not implemented.
-  if (modifier.flags & STRING_FLAGS_FULL_WORD &&
-      (modifier.flags & STRING_FLAGS_BASE64 ||
-       modifier.flags & STRING_FLAGS_BASE64_WIDE))
-  {
-    result = ERROR_INVALID_MODIFIER;
-    yr_compiler_set_error_extra_info(
-        compiler,
-        modifier.flags & STRING_FLAGS_BASE64
-            ? "invalid modifier combination: base64 fullword"
-            : "invalid modifier combination: base64wide fullword") goto _exit;
-  }
-
-  // base64 and xor together is not implemented.
-  if (modifier.flags & STRING_FLAGS_XOR &&
-      (modifier.flags & STRING_FLAGS_BASE64 ||
-       modifier.flags & STRING_FLAGS_BASE64_WIDE))
-  {
-    result = ERROR_INVALID_MODIFIER;
-    yr_compiler_set_error_extra_info(
-        compiler,
-        modifier.flags & STRING_FLAGS_BASE64
-            ? "invalid modifier combination: base64 xor"
-            : "invalid modifier combination: base64wide xor") goto _exit;
-  }
 
   if (!(modifier.flags & STRING_FLAGS_WIDE) &&
       !(modifier.flags & STRING_FLAGS_XOR) &&
@@ -660,6 +710,25 @@ int yr_parser_reduce_string_declaration(
   // file. All strings are marked STRING_FLAGS_FIXED_OFFSET initially,
   // and unmarked later if required.
   modifier.flags |= STRING_FLAGS_FIXED_OFFSET;
+
+  // If string identifier is $ this is an anonymous string, if not add the
+  // identifier to strings_table.
+  if (strcmp(identifier, "$") == 0)
+  {
+    modifier.flags |= STRING_FLAGS_ANONYMOUS;
+  }
+  else
+  {
+    FAIL_ON_ERROR(yr_hash_table_add_uint32(
+        compiler->strings_table,
+        identifier,
+        NULL,
+        compiler->current_string_idx));
+  }
+
+  // Make sure that the the string does not have an invalid combination of
+  // modifiers.
+  FAIL_ON_ERROR(_yr_parser_check_string_modifiers(yyscanner, modifier));
 
   if (modifier.flags & STRING_FLAGS_HEXADECIMAL ||
       modifier.flags & STRING_FLAGS_REGEXP ||
@@ -684,9 +753,8 @@ int yr_parser_reduce_string_declaration(
           identifier,
           re_error.message);
 
-      yr_compiler_set_error_extra_info(compiler, message)
-
-          goto _exit;
+      yr_compiler_set_error_extra_info(compiler, message);
+      goto _exit;
     }
 
     if (re_ast->flags & RE_FLAGS_FAST_REGEXP)
@@ -709,9 +777,9 @@ int yr_parser_reduce_string_declaration(
       yr_compiler_set_error_extra_info(
           compiler,
           "greedy and ungreedy quantifiers can't be mixed in a regular "
-          "expression")
+          "expression");
 
-          goto _exit;
+      goto _exit;
     }
 
     if (yr_re_ast_has_unbounded_quantifier_for_dot(re_ast))
@@ -824,7 +892,7 @@ int yr_parser_reduce_string_declaration(
 
   if (min_atom_quality < compiler->atoms_config.quality_warning_threshold)
   {
-    yywarning(yyscanner, "%s is slowing down scanning", identifier);
+    yywarning(yyscanner, "string \"%s\" may slow down scanning", identifier);
   }
 
 _exit:
@@ -838,12 +906,28 @@ _exit:
   return result;
 }
 
+static int wildcard_iterator(
+    void* prefix,
+    size_t prefix_len,
+    void* _value,
+    void* data)
+{
+  const char* identifier = (const char*) data;
+
+  // If the identifier is prefixed by prefix, then it matches the wildcard.
+  if (!strncmp(prefix, identifier, prefix_len))
+    return ERROR_IDENTIFIER_MATCHES_WILDCARD;
+
+  return ERROR_SUCCESS;
+}
+
 int yr_parser_reduce_rule_declaration_phase_1(
     yyscan_t yyscanner,
     int32_t flags,
     const char* identifier,
     YR_ARENA_REF* rule_ref)
 {
+  int result;
   YR_FIXUP* fixup;
   YR_COMPILER* compiler = yyget_extra(yyscanner);
 
@@ -859,9 +943,26 @@ int yr_parser_reduce_rule_declaration_phase_1(
     // A rule or variable with the same identifier already exists, return the
     // appropriate error.
 
-    yr_compiler_set_error_extra_info(
-        compiler, identifier) return ERROR_DUPLICATED_IDENTIFIER;
+    yr_compiler_set_error_extra_info(compiler, identifier);
+    return ERROR_DUPLICATED_IDENTIFIER;
   }
+
+  // Iterate over all identifiers in wildcard_identifiers_table, and check if
+  // any of them are a prefix of the identifier being declared. If so, return
+  // ERROR_IDENTIFIER_MATCHES_WILDCARD.
+  result = yr_hash_table_iterate(
+      compiler->wildcard_identifiers_table,
+      ns->name,
+      wildcard_iterator,
+      (void*) identifier);
+
+  if (result == ERROR_IDENTIFIER_MATCHES_WILDCARD)
+  {
+    // This rule matches an existing wildcard rule set.
+    yr_compiler_set_error_extra_info(compiler, identifier);
+  }
+
+  FAIL_ON_ERROR(result);
 
   FAIL_ON_ERROR(yr_arena_allocate_struct(
       compiler->arena,
@@ -939,8 +1040,8 @@ int yr_parser_reduce_rule_declaration_phase_2(
   YR_STRING* string;
   YR_COMPILER* compiler = yyget_extra(yyscanner);
 
-  yr_get_configuration(
-      YR_CONFIG_MAX_STRINGS_PER_RULE, (void*) &max_strings_per_rule);
+  yr_get_configuration_uint32(
+      YR_CONFIG_MAX_STRINGS_PER_RULE, &max_strings_per_rule);
 
   YR_RULE* rule = (YR_RULE*) yr_arena_ref_to_ptr(compiler->arena, rule_ref);
 
@@ -1156,8 +1257,9 @@ int yr_parser_reduce_import(yyscan_t yyscanner, SIZED_STRING* module_name)
 
   if (!_yr_parser_valid_module_name(module_name))
   {
-    yr_compiler_set_error_extra_info(
-        compiler, module_name->c_string) return ERROR_INVALID_MODULE_NAME;
+    yr_compiler_set_error_extra_info(compiler, module_name->c_string);
+
+    return ERROR_INVALID_MODULE_NAME;
   }
 
   YR_NAMESPACE* ns = (YR_NAMESPACE*) yr_arena_get_ptr(
@@ -1185,9 +1287,10 @@ int yr_parser_reduce_import(yyscan_t yyscanner, SIZED_STRING* module_name)
   result = yr_modules_do_declarations(module_name->c_string, module_structure);
 
   if (result == ERROR_UNKNOWN_MODULE)
-    yr_compiler_set_error_extra_info(compiler, module_name->c_string)
+    yr_compiler_set_error_extra_info(compiler, module_name->c_string);
 
-        if (result != ERROR_SUCCESS) return result;
+  if (result != ERROR_SUCCESS)
+    return result;
 
   FAIL_ON_ERROR(
       _yr_compiler_store_string(compiler, module_name->c_string, &ref));
@@ -1319,16 +1422,16 @@ int yr_parser_reduce_operation(
     else
     {
       yr_compiler_set_error_extra_info_fmt(
-          compiler, "strings don't support \"%s\" operation", op)
+          compiler, "strings don't support \"%s\" operation", op);
 
-          return ERROR_WRONG_TYPE;
+      return ERROR_WRONG_TYPE;
     }
   }
   else
   {
-    yr_compiler_set_error_extra_info(compiler, "type mismatch")
+    yr_compiler_set_error_extra_info(compiler, "type mismatch");
 
-        return ERROR_WRONG_TYPE;
+    return ERROR_WRONG_TYPE;
   }
 
   return ERROR_SUCCESS;

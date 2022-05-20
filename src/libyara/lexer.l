@@ -196,6 +196,7 @@ octdigit      [0-7]
 "for"                   { return _FOR_;         }
 "all"                   { return _ALL_;         }
 "any"                   { return _ANY_;         }
+"none"                  { return _NONE_;        }
 "entrypoint"            { return _ENTRYPOINT_;  }
 "filesize"              { return _FILESIZE_;    }
 "matches"               { return _MATCHES_;     }
@@ -205,7 +206,9 @@ octdigit      [0-7]
 "icontains"             { return _ICONTAINS_;   }
 "istartswith"           { return _ISTARTSWITH_; }
 "iendswith"             { return _IENDSWITH_;   }
+"iequals"               { return _IEQUALS_;     }
 "import"                { return _IMPORT_;      }
+"defined"               { return _DEFINED_;     }
 
 
 "/*"                    { BEGIN(comment);       }
@@ -579,6 +582,7 @@ u?int(8|16|32)(be)? {
 
   *yyextra->lex_buf_ptr = '\0';
   memcpy(s->c_string, yyextra->lex_buf, yyextra->lex_buf_len + 1);
+
   yylval->sized_string = s;
 
   BEGIN(INITIAL);
@@ -629,12 +633,12 @@ u?int(8|16|32)(be)? {
 
 <str>\\x{hexdigit}{2} {
 
-   int result;
+  int result;
 
-   sscanf( yytext + 2, "%x", &result );
-   lex_check_space_ok("X", yyextra->lex_buf_len, YR_LEX_BUF_SIZE);
-   *yyextra->lex_buf_ptr++ = result;
-   yyextra->lex_buf_len++;
+  sscanf(yytext + 2, "%x", &result);
+  lex_check_space_ok("X", yyextra->lex_buf_len, YR_LEX_BUF_SIZE);
+  *yyextra->lex_buf_ptr++ = result;
+  yyextra->lex_buf_len++;
 }
 
 
@@ -665,6 +669,7 @@ u?int(8|16|32)(be)? {
 
     *yyextra->lex_buf_ptr = '\0';
     strlcpy(s->c_string, yyextra->lex_buf, s->length + 1);
+
     yylval->sized_string = s;
   }
   else
@@ -891,10 +896,15 @@ int yr_lex_parse_rules_string(
 
   compiler->errors = 0;
 
+  if (yylex_init(&yyscanner) != 0)
+  {
+    compiler->errors = 1;
+    compiler->last_error = ERROR_INSUFFICIENT_MEMORY;
+    return compiler->errors;
+  }
+
   if (setjmp(compiler->error_recovery) != 0)
     return compiler->errors;
-
-  yylex_init(&yyscanner);
 
   #if YYDEBUG
   yydebug = 1;
@@ -918,10 +928,15 @@ int yr_lex_parse_rules_file(
 
   compiler->errors = 0;
 
+  if (yylex_init(&yyscanner) != 0)
+  {
+    compiler->errors = 1;
+    compiler->last_error = ERROR_INSUFFICIENT_MEMORY;
+    return compiler->errors;
+  }
+
   if (setjmp(compiler->error_recovery) != 0)
     return compiler->errors;
-
-  yylex_init(&yyscanner);
 
   #if YYDEBUG
   yydebug = 1;
@@ -987,7 +1002,13 @@ int yr_lex_parse_rules_fd(
     return compiler->errors;
   }
 
-  yylex_init(&yyscanner);
+  if (yylex_init(&yyscanner) != 0)
+  {
+    yr_free(buffer);
+    compiler->errors = 1;
+    compiler->last_error = ERROR_INSUFFICIENT_MEMORY;
+    return compiler->errors;
+  }
 
   #if YYDEBUG
   yydebug = 1;

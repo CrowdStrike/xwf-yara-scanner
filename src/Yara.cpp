@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
-// YARA Scanner X-Tension Version 1.0
-// Based on YARA 4.1.0 API
+// YARA Scanner X-Tension Version 1.1
+// Based on YARA 4.2.1 API
 // Written by Chris Mayhew - CrowdStrike
 // Thank you to the team at CrowdStrike for helping to build and troubleshoot
 // Copyright 2021 CrowdStrike, Inc.
@@ -32,14 +32,17 @@ YR_RULES* gYaraRules;
 YR_SCANNER* gYaraScanner;
 INT64 gYaraWarnings = 0;
 INT64 g_nOpTypeBackup = 0;
+INT64 g_nOpTypeBackup_init = 0;
 INT64 gUserFileSize = 0;
 INT64 gBufferSize = 100000000; // 100MB
 time_t gProcessingBegin;
+LPWSTR gUserInput = new WCHAR[gYaraRulePathSize];
+char yara_rule_file_char[gYaraRulePathSize];
 
 // To convert strings to wstrings
-std::wstring string2wstring (
+std::wstring string2wstring(
 	const std::string& str
-	)
+)
 {
 	int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), nullptr, 0);
 	std::wstring wstrTo(size_needed, 0);
@@ -48,12 +51,12 @@ std::wstring string2wstring (
 }
 
 // This is called on successful YARA rule match
-int YaraScanCallback ( 
+int YaraScanCallback(
 	YR_SCAN_CONTEXT* context,
 	int message,
 	void* message_data,
 	void* user_data
-	)
+)
 {
 	// (LONG)user_data is the nItemID passed into YaraScanCallback()
 	INT64 nitemID = (INT64)user_data;
@@ -91,14 +94,14 @@ int YaraScanCallback (
 	return CALLBACK_CONTINUE;
 }
 
-void YaraCompileCallback (
+void YaraCompileCallback(
 	int nErrorLevel,
 	const char* szFileNameA,
 	int nLineNumber,
 	const YR_RULE* pRule,
 	const char* szErrorMessageA,
 	void* pUserData
-	)
+)
 {
 	std::wstring warning = L"error";
 	// replace warning different string if it's at the different warning level
@@ -119,27 +122,123 @@ void YaraCompileCallback (
 }
 
 // XT_Init() will be called before anything else happens
-LONG 
-XT_Init (
+LONG
+XT_Init(
 	DWORD nVersion,
 	DWORD nFlags,
 	HANDLE hMainWnd,
 	void* lpReserved
-	)
+)
 {
 	XT_RetrieveFunctionPointers();
+
+	g_nOpTypeBackup_init = nFlags;
+
+	// Don't do anything else if XWF is doing a quick check
+	if (g_nOpTypeBackup_init < XT_INIT_QUICKCHECK)
+	{
+		// Initialize YARA library
+		if (yr_initialize() != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"Failed to initialise YARA library", 0);
+			return XT_PREPARE_CALL_FINALIZE;
+		}
+		XWF_OutputMessage(L"YARA library initialised", 0);
+
+		// Preload gUserInput with default YARA rules name
+		swprintf(gUserInput, gYaraRulePathSize, L"%s", L"yararules.txt");
+
+		// Load YARA rules from file first
+		if (XWF_GetUserInput(L"Enter location of YARA rules file", gUserInput, gYaraRulePathSize, 0) == -1)
+		{
+			// -1 returned if user clicks cancel on the input window
+			return XT_PREPARE_STOP_ALL;
+		}
+
+		// we need to save the user input as a char for the function yr_compiler_add_file()
+		std::wcstombs(yara_rule_file_char, gUserInput, gYaraRulePathSize);
+
+		// Create a YARA compiler
+		if (yr_compiler_create(&gYaraCompiler) != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"Failed to create YARA compiler", 0);
+			gYaraCompiler = nullptr;
+			return XT_PREPARE_CALL_FINALIZE;
+		}
+
+		// Set compiler callback function
+		yr_compiler_set_callback(gYaraCompiler, YaraCompileCallback, nullptr);
+
+		// Compile the YARA rules from the rule file yara_rule_file_char
+		FILE* fl;
+		if (_wfopen_s(&fl, gUserInput, L"r") != 0)
+		{
+			XWF_OutputMessage(L"YARA rule file empty or not found - exiting", 0);
+			return XT_PREPARE_STOP_ALL;
+		}
+		delete[] gUserInput;
+
+		if (yr_compiler_add_file(gYaraCompiler, fl, nullptr, yara_rule_file_char) != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"YARA was unable to compile the provided rules", 0);
+			yr_compiler_destroy(gYaraCompiler);
+			if (fl != nullptr)
+			{
+				fclose(fl);
+			}
+			yr_finalize();
+			return XT_PREPARE_STOP_ALL;
+		}
+		// close the rules file 
+		if (fl != nullptr)
+		{
+			fclose(fl);
+		}
+
+		if (gYaraWarnings > 0)
+		{
+			std::wstring warnings_yara = L"There were " + std::to_wstring(gYaraWarnings) +
+				L" YARA compile warnings. Check these against the stand-alone YARA v4.2.1 binary";
+			XWF_OutputMessage(warnings_yara.c_str(), 0);
+		}
+
+		// Get the compiled rules from the compiler
+		if (yr_compiler_get_rules(gYaraCompiler, &gYaraRules) != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"Failed to load the compiled rules - exiting", 0);
+			yr_compiler_destroy(gYaraCompiler);
+			return XT_PREPARE_CALL_FINALIZE;
+		}
+
+		// Creates a new scanner that can be used for scanning data with the provided rules.
+		if (yr_scanner_create(gYaraRules, &gYaraScanner) != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"Failed to create YARA scanner", 0);
+			yr_compiler_destroy(gYaraCompiler);
+			gYaraScanner = nullptr;
+			return XT_PREPARE_CALL_FINALIZE;
+		}
+		// Destroy the compiler as we no longer need it
+		else
+		{
+			yr_compiler_destroy(gYaraCompiler);
+		}
+
+		XWF_OutputMessage(L"YARA rules compiled successfully", 0);
+	}
+
 	return XT_INIT_THREAD_SAFE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // XT_About() will be called when the user requests to see information about the DLL.
 LONG
-XT_About (
+XT_About(
 	HANDLE hParentWnd,
 	void* lpReserved
-	)
+)
 {
-	XWF_OutputMessage(L"YARA X-Tension V1.0 written by Chris Mayhew - CrowdStrike", 0);
+	XWF_OutputMessage(L"YARA X-Tension V1.1 written by Chris Mayhew - CrowdStrike", 0);
 	return 0;
 }
 
@@ -147,49 +246,17 @@ XT_About (
 // XT_Prepare will be called immediately for a volume when volume snapshot refinement
 // or some other action starts
 LONG
-XT_Prepare (
+XT_Prepare(
 	HANDLE hVolume,
 	HANDLE hEvidence,
 	DWORD nOpType,
 	void* lpReserved
-	)
+)
 {
 	// save the mode in which the X-Tension is called
 	g_nOpTypeBackup = nOpType;
 
-	// Initialize YARA library
-	if (yr_initialize() != ERROR_SUCCESS)
-	{
-		XWF_OutputMessage(L"Failed to initialise YARA library", 0);
-		return XT_PREPARE_CALL_FINALIZE;
-	}
-	XWF_OutputMessage(L"YARA library initialised", 0);
-
-	// Load YARA rules from file first
-	LPWSTR user_input = new WCHAR[gYaraRulePathSize];
-	swprintf(user_input, gYaraRulePathSize, L"%s", L"yararules.txt");
-
-	if (XWF_GetUserInput(L"Enter location of YARA rules file", user_input, gYaraRulePathSize, 0) == -1)
-	{
-		// -1 returned if user clicks cancel on the input window
-		delete[] user_input;
-		return XT_PREPARE_STOP_ALL;
-	}
-
-	FILE* fl;
-	if (_wfopen_s(&fl, user_input, L"r") != 0)
-	{
-		XWF_OutputMessage(L"YARA rule file empty or not found - exiting", 0);
-		delete[] user_input;
-		return XT_PREPARE_STOP_ALL;
-	}
-
-	// we need to save the user input as a char for the function yr_compiler_add_file()
-	char yara_rule_file_char[gYaraRulePathSize];
-	std::wcstombs(yara_rule_file_char, user_input, gYaraRulePathSize);
-	delete[] user_input;
-
-	if (g_nOpTypeBackup == XT_ACTION_RVS)
+	if (g_nOpTypeBackup == XT_ACTION_RVS && gUserFileSize == 0)
 	{
 		gUserFileSize = XWF_GetUserInput(L"[RVS] Enter maximum file size to scan (in MB).", 0, 0, 1);
 		// -1 returned if user clicks cancel on the input window
@@ -211,9 +278,9 @@ XT_Prepare (
 			gBufferSize = gBufferSize * 1000000;
 		}
 	}
-	else if (g_nOpTypeBackup == XT_ACTION_DBC)
+	else if (g_nOpTypeBackup == XT_ACTION_DBC && gBufferSize == 0)
 	{
-		// Ask for the chunk size regarless in DBC mode
+		// Ask for the chunk size regardless in DBC mode
 		gBufferSize = XWF_GetUserInput(L"[DBC] Enter scan buffer size (in MB).", 0, 0, 1);
 		if (gBufferSize == -1)
 		{
@@ -221,66 +288,6 @@ XT_Prepare (
 		}
 		gBufferSize = gBufferSize * 1000000;
 	}
-
-	// Create a YARA compiler
-	if (yr_compiler_create(&gYaraCompiler) != ERROR_SUCCESS)
-	{
-		XWF_OutputMessage(L"Failed to create YARA compiler", 0);
-		gYaraCompiler = nullptr;
-		return XT_PREPARE_CALL_FINALIZE;
-	}
-
-	// Set compiler callback function
-	yr_compiler_set_callback(gYaraCompiler, YaraCompileCallback, nullptr);
-
-	// Compile the YARA rules from the rule file yara_rule_file_char
-	if (yr_compiler_add_file(gYaraCompiler, fl, nullptr, yara_rule_file_char) != ERROR_SUCCESS)
-	{
-		XWF_OutputMessage(L"YARA was unable to compile the provided rules", 0);
-		yr_compiler_destroy(gYaraCompiler);
-		if (fl != nullptr)
-		{
-			fclose(fl);
-		}
-		yr_finalize();
-		return XT_PREPARE_STOP_ALL;
-	}
-	// close the rules file 
-	if (fl != nullptr)
-	{
-		fclose(fl);
-	}
-
-	if (gYaraWarnings > 0)
-	{
-		std::wstring warnings_yara = L"There were " + std::to_wstring(gYaraWarnings) + 
-			L" YARA compile warnings. Check these against the stand alone YARA v4.1.0 binary";
-		XWF_OutputMessage(warnings_yara.c_str(), 0);
-	}
-
-	// Get the compiled rules from the compiler
-	if (yr_compiler_get_rules(gYaraCompiler, &gYaraRules) != ERROR_SUCCESS)
-	{
-		XWF_OutputMessage(L"Failed to load the compiled rules - exiting", 0);
-		yr_compiler_destroy(gYaraCompiler);
-		return XT_PREPARE_CALL_FINALIZE;
-	}
-
-	// Creates a new scanner that can be used for scanning data with the provided rules.
-	if (yr_scanner_create(gYaraRules, &gYaraScanner) != ERROR_SUCCESS)
-	{
-		XWF_OutputMessage(L"Failed to create YARA scanner", 0);
-		yr_compiler_destroy(gYaraCompiler);
-		gYaraScanner = nullptr;
-		return XT_PREPARE_CALL_FINALIZE;
-	}
-	// Destroy the compiler as we no longer need it
-	else
-	{
-		yr_compiler_destroy(gYaraCompiler);
-	}
-
-	XWF_OutputMessage(L"YARA rules compiled successfully", 0);
 
 	// Bring up the progress bar if the user runs from context menu
 	if (g_nOpTypeBackup == XT_ACTION_DBC)
@@ -293,13 +300,14 @@ XT_Prepare (
 
 ///////////////////////////////////////////////////////////////////////////////
 // XT_Finalize
+// Will be called when volume snapshot refinement or another operation has completed. 
 LONG
-XT_Finalize (
+XT_Finalize(
 	HANDLE hVolume,
 	HANDLE hEvidence,
 	DWORD nOpType,
 	void* lpReserved
-	)
+)
 {
 	// show the time taken
 	if (g_nOpTypeBackup == XT_ACTION_DBC)
@@ -311,12 +319,26 @@ XT_Finalize (
 		XWF_OutputMessage(time_taken.c_str(), 0);
 	}
 
-	// Finalise YARA library
-	if (yr_finalize() != ERROR_SUCCESS)
+	return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// XT_Done
+// Will be called just before the DLL is unloaded
+LONG
+XT_Done(
+	void* lpReserved
+)
+{
+	if (g_nOpTypeBackup_init < XT_INIT_QUICKCHECK)
 	{
-		XWF_OutputMessage(L"Failed to finalise YARA library", 0);
+		// Finalise YARA library
+		if (yr_finalize() != ERROR_SUCCESS)
+		{
+			XWF_OutputMessage(L"Failed to finalise YARA library", 0);
+		}
+		XWF_OutputMessage(L"YARA library finalised", 0);
 	}
-	XWF_OutputMessage(L"YARA library finalised", 0);
 
 	return 0;
 }
@@ -324,21 +346,21 @@ XT_Finalize (
 ///////////////////////////////////////////////////////////////////////////////
 // XT_ProcessItemEx() will be called for each item in the volume snapshot that is targeted for refinement
 LONG
-XT_ProcessItemEx (
+XT_ProcessItemEx(
 	INT64 nItemID,
 	HANDLE hItem,
 	void* lpReserved
-	)
+)
 {
 	// grab the set BufferSize from the global variable to save as local
 	INT64 BufferSize = gBufferSize;
 
 	// allow the user to cancel if lengthy operation
 	XWF_ShouldStop();
-	
+
 	// Get logical file size first and later create the buffer to load the file into
 	INT64 FileSize = XWF_GetProp(hItem, 1, nullptr);
-	
+
 	// if running via RVS - skip files more than UserFileSize
 	if (g_nOpTypeBackup == XT_ACTION_RVS && FileSize > gUserFileSize)
 	{

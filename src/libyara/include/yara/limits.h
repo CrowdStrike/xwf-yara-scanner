@@ -82,12 +82,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // must specify the threshold when calling yr_compiler_set_atom_quality_table.
 #ifndef YR_ATOM_QUALITY_WARNING_THRESHOLD
 #define YR_ATOM_QUALITY_WARNING_THRESHOLD \
-  YR_MAX_ATOM_QUALITY - 20 * YR_MAX_ATOM_LENGTH + 38
+  YR_MAX_ATOM_QUALITY - 22 * YR_MAX_ATOM_LENGTH + 38
 #endif
 
 // If a rule generates more than this number of atoms a warning is shown.
 #ifndef YR_ATOMS_PER_RULE_WARNING_THRESHOLD
-#define YR_ATOMS_PER_RULE_WARNING_THRESHOLD 10000
+#define YR_ATOMS_PER_RULE_WARNING_THRESHOLD 12000
 #endif
 
 // Maximum number of nested "for" loops in rule. Rules ith nested loops
@@ -124,12 +124,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define YR_MAX_OVERLOADED_FUNCTIONS 10
 #endif
 
-// Size of the stack used by yr_re_fast_exec.
-#ifndef YR_MAX_FAST_RE_STACK
-#define YR_MAX_FAST_RE_STACK 300
-#endif
-
-
 // Regular expressions like /foo.{x,y}bar/ are split in two separate ones /foo/
 // and /bar/ if x is larger than YR_STRING_CHAINING_THRESHOLD. This also applies
 // to hex strings like { 01 02 03 [x-y] 004 05 06 }.
@@ -164,7 +158,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define RE_MAX_STACK 1024
 #endif
 
-// Maximum input size scanned by yr_re_exec
+// Maximum input size scanned by yr_re_exec and yr_re_fast_exec
 #ifndef YR_RE_SCAN_LIMIT
 #define YR_RE_SCAN_LIMIT 4096
 #endif

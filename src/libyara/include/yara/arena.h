@@ -35,9 +35,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <yara/limits.h>
 #include <yara/stream.h>
 
-#define EOL ((uint32_t) -1)
+#define EOL ((size_t) -1)
 
-#define YR_ARENA_FILE_VERSION 18
+#define YR_ARENA_FILE_VERSION 19
 
 #define YR_ARENA_NULL_REF \
   (YR_ARENA_REF) { UINT32_MAX, UINT32_MAX }

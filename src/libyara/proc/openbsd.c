@@ -29,15 +29,22 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #if defined(USE_OPENBSD_PROC)
 
-#include <errno.h>
+// Prevent clang-format from complaining about the include order,
+// changing the order breaks compilation.
+//
+// clang-format off
+#include <sys/types.h>
 #include <sys/ptrace.h>
 #include <sys/sysctl.h>
-#include <sys/types.h>
 #include <sys/wait.h>
+
+#include <errno.h>
+// clang-format on
+
 #include <yara/error.h>
+#include <yara/libyara.h>
 #include <yara/mem.h>
 #include <yara/proc.h>
-
 
 typedef struct _YR_PROC_INFO
 {
@@ -45,7 +52,6 @@ typedef struct _YR_PROC_INFO
   uint64_t old_end;
   struct kinfo_vmentry vm_entry;
 } YR_PROC_INFO;
-
 
 int _yr_process_attach(int pid, YR_PROC_ITERATOR_CTX* context)
 {
@@ -57,6 +63,8 @@ int _yr_process_attach(int pid, YR_PROC_ITERATOR_CTX* context)
 
   if (proc_info == NULL)
     return ERROR_INSUFFICIENT_MEMORY;
+
+  memset(proc_info, 0, sizeof(YR_PROC_INFO));
 
   proc_info->pid = pid;
   if (ptrace(PT_ATTACH, pid, NULL, 0) == -1)
@@ -88,7 +96,6 @@ int _yr_process_attach(int pid, YR_PROC_ITERATOR_CTX* context)
   return ERROR_SUCCESS;
 }
 
-
 int _yr_process_detach(YR_PROC_ITERATOR_CTX* context)
 {
   YR_PROC_INFO* proc_info = (YR_PROC_INFO*) context->proc_info;
@@ -97,7 +104,6 @@ int _yr_process_detach(YR_PROC_ITERATOR_CTX* context)
 
   return ERROR_SUCCESS;
 }
-
 
 YR_API const uint8_t* yr_process_fetch_memory_block_data(YR_MEMORY_BLOCK* block)
 {
@@ -135,7 +141,6 @@ YR_API const uint8_t* yr_process_fetch_memory_block_data(YR_MEMORY_BLOCK* block)
   return context->buffer;
 }
 
-
 YR_API YR_MEMORY_BLOCK* yr_process_get_next_memory_block(
     YR_MEMORY_BLOCK_ITERATOR* iterator)
 {
@@ -145,25 +150,39 @@ YR_API YR_MEMORY_BLOCK* yr_process_get_next_memory_block(
   int mib[] = {CTL_KERN, KERN_PROC_VMMAP, proc_info->pid};
   size_t len = sizeof(struct kinfo_vmentry);
 
+  uint64_t current_begin = context->current_block.base +
+                           context->current_block.size;
+
+  uint64_t max_process_memory_chunk;
+
+  yr_get_configuration_uint64(
+      YR_CONFIG_MAX_PROCESS_MEMORY_CHUNK, &max_process_memory_chunk);
+
   iterator->last_error = ERROR_SUCCESS;
 
-  if (sysctl(mib, 3, &proc_info->vm_entry, &len, NULL, 0) < 0)
-    return NULL;
+  if (proc_info->old_end <= current_begin)
+  {
+    if (sysctl(mib, 3, &proc_info->vm_entry, &len, NULL, 0) < 0)
+      return NULL;
 
-  // no more blocks
-  if (proc_info->old_end == proc_info->vm_entry.kve_end)
-    return NULL;
+    // no more blocks
+    if (proc_info->old_end == proc_info->vm_entry.kve_end)
+      return NULL;
 
-  proc_info->old_end = proc_info->vm_entry.kve_end;
-  context->current_block.base = proc_info->vm_entry.kve_start;
-  context->current_block.size = proc_info->vm_entry.kve_end -
-                                proc_info->vm_entry.kve_start;
+    current_begin = proc_info->vm_entry.kve_start;
+    proc_info->old_end = proc_info->vm_entry.kve_end;
 
-  proc_info->vm_entry.kve_start = proc_info->vm_entry.kve_start + 1;
+    proc_info->vm_entry.kve_start = proc_info->vm_entry.kve_start + 1;
+  }
+
+  context->current_block.base = current_begin;
+  context->current_block.size = yr_min(
+      proc_info->old_end - current_begin, max_process_memory_chunk);
+
+  assert(context->current_block.size > 0);
 
   return &context->current_block;
 }
-
 
 YR_API YR_MEMORY_BLOCK* yr_process_get_first_memory_block(
     YR_MEMORY_BLOCK_ITERATOR* iterator)
@@ -173,7 +192,12 @@ YR_API YR_MEMORY_BLOCK* yr_process_get_first_memory_block(
 
   proc_info->vm_entry.kve_start = 0;
 
-  return yr_process_get_next_memory_block(iterator);
+  YR_MEMORY_BLOCK* result = yr_process_get_next_memory_block(iterator);
+
+  if (result == NULL)
+    iterator->last_error = ERROR_COULD_NOT_READ_PROCESS_MEMORY;
+
+  return result;
 }
 
 #endif
