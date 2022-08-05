@@ -10,3 +10,6 @@
 /MSVC 2019/.vs/
 **/Release/
 **/Debug/
+*.obj
+MSVC 2019/src/
+MSVC 2019/src/libyara/
