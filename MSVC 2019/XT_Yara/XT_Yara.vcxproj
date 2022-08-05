@@ -49,7 +49,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(IncludePath)</IncludePath>
-    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <OutDir>$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -96,12 +96,12 @@
     <ClCompile Include="..\..\src\Yara.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Yara.def" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\XT_Main\XT_Main.vcxproj">
       <Project>{459c774a-bfa9-45ac-b15d-581b61025150}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\Yara.def" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
