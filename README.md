@@ -15,8 +15,6 @@ There are many benefits to running YARA within X-Ways, versus running YARA via t
 * A license for X-Ways Forensics (version v19.9 SR-7 and later)
 * A set of YARA rules
 
-_Note: The compiled library for YARA V4.1.0 is included_
-
 #  How to Install
 Assuming that X-Ways Forensics is installed and setup correctly, simply download the compiled DLL from the [releases page](https://github.com/CrowdStrike/xwf-yara-scanner/releases) and copy it into your *x64* folder within the X-Ways Forensics install folder.
 
