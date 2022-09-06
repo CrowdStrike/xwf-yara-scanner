@@ -23,7 +23,9 @@ The X-Tension can be executed via the X-Ways Forensics GUI or via the X-Ways For
 
 Within the GUI, there are two ways to execute the X-Tension; via the Refine Volume Snapshot ("RVS") menu, or via the Directory Browser Context ("DBC") menu. Which method depends on what you are trying to achieve. Typically, running YARA via the RVS menu will be very fast if the user specifies a sensible maximum file size (for example 25MB). If for any reason the user wants to run YARA against larger individual files via the DBC menu, the X-Tension will split the data up into chunks (the size of which is provided by the user).
 
-**If any of the YARA rules fail to compile**, an error will be displayed within the X-Ways Messages window showing which line the error occurred on, and the YARA error message. Fix these errors within the YARA rule and try again. A count of YARA warnings will be displayed via the X-Ways Messages window, but the exact details of these warnings are not provided by the X-Tension. If you need to see these, run YARA v4.1.0 command-line interface using the same rule file. 
+**If any of the YARA rules fail to compile**, an error will be displayed within the X-Ways Messages window showing which line the error occurred on, and the YARA error message. Fix these errors within the YARA rule and try again. A count of YARA warnings will be displayed via the X-Ways Messages window, and the exact details of these warnings are logged in the X-Ways case log. 
+
+The X-Tension supports the usage of multiple YARA rule files (note that YARA will throw an error for duplicate rules and fail to compile). Alternatively it also supports the usage of a singular already compiled rule file (.yara/.yar).
 
 _Note: There is a risk that a valid YARA hit is missed if the scanned data resides across two chunk/buffer boundaries. If this is a problem, increase the buffer size or copy the file out of X-Ways and scan using the YARA command-line interface._
 
@@ -36,21 +38,29 @@ _Note: There is a risk that a valid YARA hit is missed if the scanned data resid
 \* Only if the maximum file size entered by the user is larger than 100MB. If the maximum file size is smaller than 100MB, it uses 100MB as the buffer size.
 
 ###  Refine Volume Snapshot
-Within the GUI, once you have created or opened a previously existing case, go to Specialist -> Refine Volume Snapshot. Then check the option "Run X-Tensions" and click the three dots that appear. Within the menu that pops up, click on the plus (+) symbol and navigate to the **XT_Yara.dll** file downloaded from this repository, then press OK. You should see the message "[XT] YARA library initialised" displayed within the X-Ways Messages window. 
+Within the GUI, once you have created or opened a previously existing case, go to Specialist -> Refine Volume Snapshot. Then check the option "Run X-Tensions" and click the three dots that appear. Within the menu that pops up, click on the plus (+) symbol and navigate to the **XT_Yara.dll** file downloaded from this repository, then press OK. 
 
-You will then be prompted to specify the location of the YARA rules file. You can provide a relative path if the rule file is in the same location as the DLL, or alternatively provide an absolute path to the DLL. If the file does not exist, an error will be provided in the X-Ways Messages window. An input window will be displayed and you will then be asked to provide a maximum file size to scan, which is required. 25-50MB could be an adequate maximum size if you are only looking for malware samples or web shells for example.
+You will then be prompted to select your YARA rule file. An input window will be displayed and you will then be asked to provide a maximum file size to scan, which is required. 25-50MB could be an adequate maximum size if you are only looking for malware samples or web shells for example.
 
 If the user has selected a maximum file size of more than 100MB, a second user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads.
 
 ###  Directory Browser Context Menu
-Within the GUI, once you have created or opened a previously existing case, select the file(s) you wish to scan and then right click one of them and select "Run X-Tensions...". You will then be prompted to specify the location of the YARA rules file. A user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads. 
+Within the GUI, once you have created or opened a previously existing case, select the file(s) you wish to scan and then right click one of them and select "Run X-Tensions...". You will then be prompted to specify the YARA rules file(s). A user input prompt will be displayed asking for the buffer size used by the YARA scanner. It has been tested up to 2GB with no problems, but select wisely depending your memory constraints and number of selected threads. 
 
 There is no prompt for maximum file size.
 
 #  How to Read the Output
 Files with YARA hits are added to the Report Table called "YARA Hits". The exact rules that hit are added per file, per line, within the "Comments" field inside X-Ways Forensics. 
 
+Typical output is shown below:
+```
+[XT] YARA 4.2.2 library initialised
+[XT] There were 9 YARA compile warnings. Check the XWF case log for details
+[XT] YARA rules compiled successfully
+[XT] Operation Complete. Processing time: 0.000000s
+[XT] Summary: Found 240 YARA hits
+[XT] YARA library finalised
+```
+
 #  Troubleshooting
-There are a number of known bugs, which are outlined in this section.
-* You see the error message "YARA rule file empty or not found - exiting". Please check that your YARA rule file exists and that it does not have a double ".txt.txt" file extension. If it occurs again and the file is valid, remove and re-add the X-Tension again.
 * You see the error message "Stubborn X-Tension DLL. Force unload?". This happens when the DLL remains loaded even after X-Ways calls FreeLibrary(). After clicking Yes, X-Ways Forensics tries calling FreeLibrary() a second time, which should succeed. 
