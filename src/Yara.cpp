@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
-// YARA Scanner X-Tension Version 1.2
+// YARA Scanner X-Tension Version 1.3
 // Based on YARA 4.3.2 API
 // Written by Chris Mayhew & Joe Duin - CrowdStrike
 // Thank you to the team at CrowdStrike for helping to build and troubleshoot
