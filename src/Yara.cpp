@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 // YARA Scanner X-Tension Version 1.2
-// Based on YARA 4.2.3 API
+// Based on YARA 4.3.2 API
 // Written by Chris Mayhew & Joe Duin - CrowdStrike
 // Thank you to the team at CrowdStrike for helping to build and troubleshoot
-// Copyright 2022 CrowdStrike, Inc.
+// Copyright 2023 CrowdStrike, Inc.
 ///////////////////////////////////////////////////////////////////////////////
 #include "X-Tension.h"
 #include <yara.h>
@@ -233,7 +233,10 @@ XT_Init(
 			delete[] gUserInput;
 			return XT_INIT_ABORT_LOAD;
 		}
-		XWF_OutputMessage(L"YARA library initialised", 0);
+
+		wstring result(YR_VERSION_w);
+		auto yara_version = L"YARA " + result + L" library initialised";
+		XWF_OutputMessage(yara_version.c_str(), 1);
 
 		// Get YARA file path from command line, if specified (only one file supported for now)
 		LPWSTR cmdInput = GetCommandLineW();
@@ -332,7 +335,7 @@ XT_Init(
 				auto yrLoadSuccess = yr_rules_load(yara_rule_file_char, &gYaraRules);
 				if (yrLoadSuccess == ERROR_UNSUPPORTED_FILE_VERSION)
 				{
-					XWF_OutputMessage(L"The YARA version used to compile the rules in your chosen file is incompatible with version: ", 0);
+					XWF_OutputMessage(L"The YARA version used to compile the rules in your chosen file is incompatible with version:", 0);
 					XWF_OutputMessage(YR_VERSION_w, 1);
 					yr_finalize();
 					return XT_INIT_ABORT_LOAD;
@@ -434,7 +437,9 @@ XT_About(
 	void* lpReserved
 ) noexcept
 {
-	XWF_OutputMessage(L"YARA X-Tension V1.2 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA v4.2.3", 0);
+	wstring result(YR_VERSION_w);
+	auto yara_version = L"YARA X-Tension V1.3 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA " + result;
+	XWF_OutputMessage(yara_version.c_str(), 1);
 	return 0;
 }
 
@@ -492,7 +497,7 @@ XT_Prepare(
 	}
 	else if (g_nOpTypeBackup == XT_ACTION_RUN)
 	{
-		wstring modeErrMsgBox = L"X-Tension mode not supported: Please run from RVS or DBC menu.";
+		wstring modeErrMsgBox = L"X-Tension mode not supported: Please run from Refine Volume Snapshot or file context menu.";
 		XWF_OutputMessage(modeErrMsgBox.c_str(), 0);
 		if (!gCliMode)
 		{
@@ -543,7 +548,7 @@ XT_Finalize(
 	wstring hitInfo = L"";
 	if (gYaraHitCount != 0 && gYaraHitCount - gYaraDupCount > 0)
 	{
-		hitInfo = L", files with hits have been added to the \"YARA Hits\" report table. The rule that matched has been added as a comment.";
+		hitInfo = L", files with hits have been added to the \"YARA Hits\" label (report table). The rule that matched has been added as a comment.";
 	}
 	wstring hitSummary = L"Summary: Found " + to_wstring(gYaraHitCount) + L" YARA " + hitPlural + dupInfo + hitInfo;
 	XWF_OutputMessage(hitSummary.c_str(), 0);
@@ -628,7 +633,7 @@ XT_ProcessItemEx(
 		if (XWF_Read(hItem, Offset, FileBuffer, BufferSize) != BufferSize)
 		{
 			wstring XwfReadError = L"Error reading the contents of " + FileName +
-				L" into memory. Export file and scan with standlone YARA binary";
+				L" into memory. Export file and scan with standalone YARA binary";
 			XWF_OutputMessage(XwfReadError.c_str(), 0);
 		}
 

@@ -39,7 +39,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;CUCKOO_MODULE;HASH_MODULE;DOTNET_MODULE;HAVE_LIBCRYPTO;USE_WINDOWS_PROC;YR_BUILDING_STATIC_LIB</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;CUCKOO_MODULE;HASH_MODULE;DOTNET_MODULE;HAVE_LIBCRYPTO;USE_WINDOWS_PROC;YR_BUILDING_STATIC_LIB;BUCKETS_128;CHECKSUM_1B</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>..\..\src\libyara;..\..\src\libyara\include;..\..\src;..\packages\YARA.Jansson.x64.1.1.0\include;..\packages\YARA.OpenSSL.x64.1.1.1\include</AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4005;4273;4090</DisableSpecificWarnings>
       <CompileAs>CompileAsC</CompileAs>
@@ -91,7 +91,13 @@
     <ClCompile Include="..\..\src\libyara\modules\math\math.c" />
     <ClCompile Include="..\..\src\libyara\modules\macho\macho.c" />
     <ClCompile Include="..\..\src\libyara\modules\pe\pe.c" />
+    <ClCompile Include="..\..\src\libyara\modules\pe\authenticode-parser\authenticode.c" />
+    <ClCompile Include="..\..\src\libyara\modules\pe\authenticode-parser\helper.c" />
+    <ClCompile Include="..\..\src\libyara\modules\pe\authenticode-parser\countersignature.c" />
+    <ClCompile Include="..\..\src\libyara\modules\pe\authenticode-parser\structs.c" />
+    <ClCompile Include="..\..\src\libyara\modules\pe\authenticode-parser\certificate.c" />
     <ClCompile Include="..\..\src\libyara\modules\pe\pe_utils.c" />
+    <ClCompile Include="..\..\src\libyara\modules\string\string.c" />
     <ClCompile Include="..\..\src\libyara\modules\tests\tests.c" />
     <ClCompile Include="..\..\src\libyara\modules\time\time.c" />
     <ClCompile Include="..\..\src\libyara\notebook.c" />
@@ -111,6 +117,10 @@
     <ClCompile Include="..\..\src\libyara\stream.c" />
     <ClCompile Include="..\..\src\libyara\strutils.c" />
     <ClCompile Include="..\..\src\libyara\threading.c" />
+    <ClCompile Include="..\..\src\libyara\simple_str.c" />
+    <ClCompile Include="..\..\src\libyara\tlshc\tlsh_util.c" />
+    <ClCompile Include="..\..\src\libyara\tlshc\tlsh_impl.c" />
+    <ClCompile Include="..\..\src\libyara\tlshc\tlsh.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

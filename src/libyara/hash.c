@@ -255,7 +255,8 @@ YR_API int yr_hash_table_iterate(
     entry = table->buckets[i];
     while (entry != NULL)
     {
-      if (!strcmp(entry->ns, ns))
+      if ((entry->ns == NULL && ns == NULL)
+          || (entry->ns != NULL && ns != NULL && !strcmp(entry->ns, ns)))
       {
         result = iterate_func(
             entry->key, entry->key_length, entry->value, data);
@@ -418,7 +419,7 @@ YR_API uint32_t yr_hash_table_lookup_uint32_raw_key(
   if (ptr == NULL)
     return UINT32_MAX;
 
-  // Remove one from the pointer before converting back to integer, see
-  // comment in yr_hash_table_add_uint32.
-  return (uint32_t) (size_t) ((uint8_t*) ptr - 1);
+  // Remove one from the pointe in order to get the original value.
+  // See comment in yr_hash_table_add_uint32_raw_key.
+  return ((uint32_t) (size_t) (uint8_t*) ptr) - 1;
 }

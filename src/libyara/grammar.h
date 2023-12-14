@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YARA_YY_GRAMMAR_H_INCLUDED
-# define YY_YARA_YY_GRAMMAR_H_INCLUDED
+#ifndef YY_YARA_YY_LIBYARA_GRAMMAR_H_INCLUDED
+# define YY_YARA_YY_LIBYARA_GRAMMAR_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -189,7 +189,7 @@ extern int yara_yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 308 "grammar.y"
+#line 342 "libyara/grammar.y"
 
   YR_EXPRESSION   expression;
   SIZED_STRING*   sized_string;
@@ -197,13 +197,14 @@ union YYSTYPE
   int64_t         integer;
   double          double_;
   YR_MODIFIER     modifier;
+  YR_ENUMERATION  enumeration;
 
   YR_ARENA_REF tag;
   YR_ARENA_REF rule;
   YR_ARENA_REF meta;
   YR_ARENA_REF string;
 
-#line 207 "grammar.h"
+#line 208 "libyara/grammar.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -217,4 +218,4 @@ typedef union YYSTYPE YYSTYPE;
 int yara_yyparse (void *yyscanner, YR_COMPILER* compiler);
 
 
-#endif /* !YY_YARA_YY_GRAMMAR_H_INCLUDED  */
+#endif /* !YY_YARA_YY_LIBYARA_GRAMMAR_H_INCLUDED  */

@@ -48,8 +48,8 @@ typedef struct YR_NOTEBOOK_PAGE YR_NOTEBOOK_PAGE;
 // all the buffers allocated via yr_notebook_alloc().
 struct YR_NOTEBOOK
 {
-  // Size of each page in the notebook.
-  size_t page_size;
+  // The mininum size of each page in the notebook.
+  size_t min_page_size;
   // Pointer to the first page in the book, this is also the most recently
   // created page, the one that is being filled.
   YR_NOTEBOOK_PAGE* page_list_head;
@@ -57,6 +57,8 @@ struct YR_NOTEBOOK
 
 struct YR_NOTEBOOK_PAGE
 {
+  // Size of this page.
+  size_t size;
   // Amount of bytes in the page that are actually used.
   size_t used;
   // Pointer to next page.
@@ -77,7 +79,7 @@ struct YR_NOTEBOOK_PAGE
 //   ERROR_SUCCESS
 //   ERROR_INSUFFICIENT_MEMORY
 //
-int yr_notebook_create(size_t page_size, YR_NOTEBOOK** notebook)
+int yr_notebook_create(size_t min_page_size, YR_NOTEBOOK** notebook)
 {
   YR_NOTEBOOK* new_notebook = yr_malloc(sizeof(YR_NOTEBOOK));
 
@@ -85,7 +87,7 @@ int yr_notebook_create(size_t page_size, YR_NOTEBOOK** notebook)
     return ERROR_INSUFFICIENT_MEMORY;
 
   new_notebook->page_list_head = yr_malloc(
-      sizeof(YR_NOTEBOOK_PAGE) + page_size);
+      sizeof(YR_NOTEBOOK_PAGE) + min_page_size);
 
   if (new_notebook->page_list_head == NULL)
   {
@@ -93,7 +95,8 @@ int yr_notebook_create(size_t page_size, YR_NOTEBOOK** notebook)
     return ERROR_INSUFFICIENT_MEMORY;
   }
 
-  new_notebook->page_size = page_size;
+  new_notebook->min_page_size = min_page_size;
+  new_notebook->page_list_head->size = min_page_size;
   new_notebook->page_list_head->used = 0;
   new_notebook->page_list_head->next = NULL;
 
@@ -129,7 +132,8 @@ int yr_notebook_destroy(YR_NOTEBOOK* notebook)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Allocates a memory buffer from a notebook. The memory is freed when the
-// notebook is destroyed, allocated buffers can't be freed individually.
+// notebook is destroyed, allocated buffers can't be freed individually. The
+// returned buffer is guaranteed to be aligned to an 8-byte boundary.
 //
 // Args:
 //   notebook: Pointer to the notebook.
@@ -140,26 +144,32 @@ int yr_notebook_destroy(YR_NOTEBOOK* notebook)
 //
 void* yr_notebook_alloc(YR_NOTEBOOK* notebook, size_t size)
 {
-  // In ARM make sure the buffer's size is rounded up to a multiple of 4,
-  // which also implies that the returned pointers are aligned to 4 bytes.
+  // Round up the size to a multiple of 8, which also implies that the returned
+  // pointers are aligned to 8 bytes. The 8-byte alignment is required by some
+  // platforms (e.g. ARM and Sparc) that have strict alignment requirements when
+  // deferrencing pointers to types larger than a byte.
+  size = (size + 7) & ~0x7;
 
-#if defined(__arm__)
-  size = (size + 3) & ~0x3;
-#endif
-
-  // The requested memory size can't be larger than a notebook's page.
-  assert(size <= notebook->page_size);
+  YR_NOTEBOOK_PAGE* current_page = notebook->page_list_head;
 
   // If the requested size doesn't fit in current page's free space, allocate
   // a new page.
-  if (notebook->page_size - notebook->page_list_head->used < size)
+  if (current_page->size - current_page->used < size)
   {
+    size_t min_size = notebook->min_page_size;
+
+    // The new page must be able to fit the requested buffer, so find the
+    // multiple of notebook->min_page_size that is larger or equal than than
+    // size.
+    size_t page_size = (size / min_size) * min_size + min_size;
+
     YR_NOTEBOOK_PAGE* new_page = yr_malloc(
-        sizeof(YR_NOTEBOOK_PAGE) + notebook->page_size);
+        sizeof(YR_NOTEBOOK_PAGE) + page_size);
 
     if (new_page == NULL)
       return NULL;
 
+    new_page->size = page_size;
     new_page->used = 0;
     new_page->next = notebook->page_list_head;
     notebook->page_list_head = new_page;

@@ -27,14 +27,19 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <stdlib.h>
 #include <math.h>
 #include <yara/mem.h>
 #include <yara/modules.h>
+#include <yara/strutils.h>
 #include <yara/utils.h>
 
 #define MODULE_NAME math
 
 #define PI 3.141592653589793
+// This is more than enough space to hold the maximum signed 64bit integer as a
+// string in decimal, hex or octal, including the sign and NULL terminator.
+#define INT64_MAX_STRING 30
 
 // log2 is not defined by math.h in VC++
 
@@ -197,7 +202,7 @@ define_function(data_entropy)
   int64_t offset = integer_argument(1);  // offset where to start
   int64_t length = integer_argument(2);  // length of bytes we want entropy on
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   size_t i;
 
@@ -250,7 +255,7 @@ define_function(data_deviation)
   size_t total_len = 0;
   size_t i;
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* data = get_distribution(offset, length, context);
   if (data == NULL)
@@ -285,7 +290,7 @@ define_function(data_mean)
   int64_t offset = integer_argument(1);
   int64_t length = integer_argument(2);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   size_t total_len = 0;
   size_t i;
@@ -314,11 +319,12 @@ define_function(data_serial_correlation)
   int64_t offset = integer_argument(1);
   int64_t length = integer_argument(2);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
   YR_MEMORY_BLOCK* block = first_memory_block(context);
   YR_MEMORY_BLOCK_ITERATOR* iterator = context->iterator;
 
   double sccun = 0;
+  double sccfirst = 0;
   double scclast = 0;
   double scct1 = 0;
   double scct2 = 0;
@@ -348,6 +354,9 @@ define_function(data_serial_correlation)
       for (i = 0; i < data_len; i++)
       {
         sccun = (double) *(block_data + data_offset + i);
+        if (i == 0) {
+            sccfirst = sccun;
+        }
         scct1 += scclast * sccun;
         scct2 += sccun;
         scct3 += sccun * sccun;
@@ -373,7 +382,7 @@ define_function(data_serial_correlation)
   if (!past_first_block)
     return_float(YR_UNDEFINED);
 
-  scct1 += scclast * sccun;
+  scct1 += scclast * sccfirst;
   scct2 *= scct2;
 
   scc = total_len * scct3 - scct2;
@@ -408,7 +417,9 @@ define_function(string_serial_correlation)
     scclast = sccun;
   }
 
-  scct1 += scclast * sccun;
+  if (s->length > 0) {
+      scct1 += scclast * (double) s->c_string[0];
+  }
   scct2 *= scct2;
 
   scc = s->length * scct3 - scct2;
@@ -435,7 +446,7 @@ define_function(data_monte_carlo_pi)
   int64_t offset = integer_argument(1);
   int64_t length = integer_argument(2);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
   YR_MEMORY_BLOCK* block = first_memory_block(context);
   YR_MEMORY_BLOCK_ITERATOR* iterator = context->iterator;
 
@@ -598,7 +609,7 @@ define_function(count_range)
   int64_t offset = integer_argument(2);
   int64_t length = integer_argument(3);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution(offset, length, context);
   if (distribution == NULL)
@@ -614,7 +625,7 @@ define_function(count_global)
 {
   uint8_t byte = (uint8_t) integer_argument(1);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution_global(context);
   if (distribution == NULL)
@@ -632,7 +643,7 @@ define_function(percentage_range)
   int64_t offset = integer_argument(2);
   int64_t length = integer_argument(3);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution(offset, length, context);
   if (distribution == NULL) {
@@ -652,7 +663,7 @@ define_function(percentage_global)
 {
   uint8_t byte = (uint8_t) integer_argument(1);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution_global(context);
   if (distribution == NULL) {
@@ -673,7 +684,7 @@ define_function(mode_range)
   int64_t offset = integer_argument(1);
   int64_t length = integer_argument(2);
 
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution(offset, length, context);
   if (distribution == NULL) {
@@ -695,7 +706,7 @@ define_function(mode_range)
 
 define_function(mode_global)
 {
-  YR_SCAN_CONTEXT* context = scan_context();
+  YR_SCAN_CONTEXT* context = yr_scan_context();
 
   uint32_t* distribution = get_distribution_global(context);
   if (distribution == NULL) {
@@ -713,6 +724,38 @@ define_function(mode_global)
   }
   yr_free(distribution);
   return_integer(most_common);
+}
+
+define_function(to_string)
+{
+  int64_t i = integer_argument(1);
+  char str[INT64_MAX_STRING];
+  snprintf(str, INT64_MAX_STRING, "%" PRId64, i);
+  return_string(&str);
+}
+
+define_function(to_string_base)
+{
+  int64_t i = integer_argument(1);
+  int64_t base = integer_argument(2);
+  char str[INT64_MAX_STRING];
+  char *fmt;
+  switch (base)
+  {
+  case 10:
+    fmt = "%" PRId64;
+    break;
+  case 8:
+    fmt = "%" PRIo64;
+    break;
+  case 16:
+    fmt = "%" PRIx64;
+    break;
+  default:
+    return_string(YR_UNDEFINED);
+  }
+  snprintf(str, INT64_MAX_STRING, fmt, i);
+  return_string(&str);
 }
 
 begin_declarations
@@ -738,6 +781,8 @@ begin_declarations
   declare_function("percentage", "i", "f", percentage_global);
   declare_function("mode", "ii", "i", mode_range);
   declare_function("mode", "", "i", mode_global);
+  declare_function("to_string", "i", "s", to_string);
+  declare_function("to_string", "ii", "s", to_string_base);
 end_declarations
 
 int module_initialize(YR_MODULE* module)
@@ -756,7 +801,7 @@ int module_load(
     void* module_data,
     size_t module_data_size)
 {
-  set_float(127.5, module_object, "MEAN_BYTES");
+  yr_set_float(127.5, module_object, "MEAN_BYTES");
   return ERROR_SUCCESS;
 }
 
