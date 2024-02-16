@@ -148,7 +148,7 @@ hexdigit      [a-fA-F0-9]
 }
 
 \~  {
-  
+
   yyerror(yyscanner, lex_env, "invalid not operator (~) in hex string");
   yyterminate();
 }

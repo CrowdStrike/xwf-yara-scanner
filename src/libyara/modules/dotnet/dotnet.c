@@ -555,13 +555,13 @@ static int32_t read_blob_signed(const uint8_t** data, uint32_t* len)
 
   // first byte is enough to decode the length
   // without worrying about endiannity
-  uint8_t first_byte = *(*data);
+  int8_t first_byte = *(*data);
 
   // Encode as a one-byte integer, bit 7 clear, rotated value in bits 6
   // through 0, giving 0x01 (-2^6) to 0x7E (2^6-1).
   if (!(first_byte & 0x80))
   {
-    uint8_t tmp = first_byte >> 1;
+    int8_t tmp = first_byte >> 1;
     // sign extension in case of negative number
     if (first_byte & 0x1)
       tmp |= 0xC0;
@@ -882,7 +882,7 @@ static char* parse_signature_type(
     if (!tmp)
       break;
 
-    uint32_t* sizes = NULL;
+    int32_t* sizes = NULL;
     int32_t* lo_bounds = NULL;
 
     // Read number of dimensions
@@ -928,9 +928,9 @@ static char* parse_signature_type(
       if (num_sizes > i || num_lowbounds > i)
       {
         if (num_lowbounds > i && lo_bounds[i] != 0)
-          sstr_appendf(ss, "%lu...", lo_bounds[i]);
+          sstr_appendf(ss, "%d...", lo_bounds[i]);
         if (num_sizes > i && sizes[i] != 0)
-          sstr_appendf(ss, "%lu", sizes[i]);
+          sstr_appendf(ss, "%d", sizes[i]);
       }
       if (i + 1 != rank)
         sstr_appendf(ss, ",");
@@ -1179,7 +1179,7 @@ static bool parse_method_params(
   // Array to hold all the possible parameters
   PARAMETERS* params = yr_calloc(param_count, sizeof(PARAMETERS));
 
-  if (!params)
+  if (params == NULL && param_count > 0)
     return false;
 
   for (uint32_t idx = 0; idx < param_count; ++idx)
@@ -1190,7 +1190,7 @@ static bool parse_method_params(
     char* name = NULL;
     bool alloc = false;  // Flag if name needs freeing
 
-    if (data)            // We need param table mostly just for the param name
+    if (data)  // We need param table mostly just for the param name
     {
       PARAM_ROW row = {0};
       bool result = read_param(ctx, data, &row);
@@ -3515,7 +3515,7 @@ int module_load(
   {
     PIMAGE_NT_HEADERS32 pe_header;
 
-    block_data = block->fetch_data(block);
+    block_data = yr_fetch_block_data(block);
 
     if (block_data == NULL)
       continue;

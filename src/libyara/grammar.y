@@ -88,7 +88,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // fail_if_error() is used in parser actions for aborting the parsing if an
 // error has occurred. See fail_with_error for details.
 #define fail_if_error(e) \
-    if (e != ERROR_SUCCESS) \
+    if (e != ERROR_SUCCESS && e != ERROR_UNKNOWN_ESCAPE_SEQUENCE) \
     { \
       fail_with_error(e); \
     }
@@ -304,6 +304,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %type <expression> regexp
 %type <expression> for_expression
 %type <expression> for_quantifier
+%type <expression> condition
 
 
 %type <c_string> arguments
@@ -405,6 +406,10 @@ rule
       }
       condition '}'
       {
+        YR_RULE* rule = (YR_RULE*) yr_arena_ref_to_ptr(
+            compiler->arena, &$<rule>4);
+        rule->required_strings = $10.required_strings.count;
+
         int result = yr_parser_reduce_rule_declaration_phase_2(
             yyscanner, &$<rule>4); // rule created in phase 1
 
@@ -455,6 +460,9 @@ strings
 
 condition
     : _CONDITION_ ':' boolean_expression
+      {
+        $$ = $3;
+      }
     ;
 
 
@@ -992,6 +1000,7 @@ identifier
               $$.type = EXPRESSION_TYPE_BOOLEAN;
               $$.value.integer = YR_UNDEFINED;
               $$.identifier.ptr = NULL;
+              $$.required_strings.count = 0;
             }
             else
             {
@@ -1259,6 +1268,7 @@ regexp
 
         int result = ERROR_SUCCESS;
         int re_flags = 0;
+        int parser_flags = RE_PARSER_FLAG_NONE;
 
         if ($1->flags & SIZED_STRING_FLAGS_NO_CASE)
           re_flags |= RE_FLAGS_NO_CASE;
@@ -1266,9 +1276,13 @@ regexp
         if ($1->flags & SIZED_STRING_FLAGS_DOT_ALL)
           re_flags |= RE_FLAGS_DOT_ALL;
 
+        if (compiler->strict_escape)
+          parser_flags |= RE_PARSER_FLAG_ENABLE_STRICT_ESCAPE_SEQUENCES;
+
         result = yr_re_compile(
             $1->c_string,
             re_flags,
+            parser_flags,
             compiler->arena,
             &re_ref,
             &error);
@@ -1278,13 +1292,21 @@ regexp
         if (result == ERROR_INVALID_REGULAR_EXPRESSION)
           yr_compiler_set_error_extra_info(compiler, error.message);
 
-        if (result == ERROR_SUCCESS)
+        if (result == ERROR_SUCCESS || result == ERROR_UNKNOWN_ESCAPE_SEQUENCE)
+        {
+          if (result == ERROR_UNKNOWN_ESCAPE_SEQUENCE)
+          {
+              yywarning(
+                yyscanner,
+                "unknown escape sequence");
+          }
           result = yr_parser_emit_with_arg_reloc(
               yyscanner,
               OP_PUSH,
               yr_arena_ref_to_ptr(compiler->arena, &re_ref),
               NULL,
               NULL);
+        }
 
         fail_if_error(result);
 
@@ -1311,6 +1333,14 @@ boolean_expression
           fail_if_error(yr_parser_emit(
               yyscanner, OP_STR_TO_BOOL, NULL));
         }
+        if ($1.type != EXPRESSION_TYPE_BOOLEAN)
+        {
+          $$.required_strings.count = 0;
+        }
+        else
+        {
+          $$.required_strings.count = $1.required_strings.count;
+        }
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
       }
@@ -1322,12 +1352,14 @@ expression
         fail_if_error(yr_parser_emit_push_const(yyscanner, 1));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | _FALSE_
       {
         fail_if_error(yr_parser_emit_push_const(yyscanner, 0));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _MATCHES_ regexp
       {
@@ -1340,6 +1372,7 @@ expression
             NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _CONTAINS_ primary_expression
       {
@@ -1350,6 +1383,7 @@ expression
             yyscanner, OP_CONTAINS, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _ICONTAINS_ primary_expression
       {
@@ -1360,6 +1394,7 @@ expression
             yyscanner, OP_ICONTAINS, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _STARTSWITH_ primary_expression
       {
@@ -1370,6 +1405,7 @@ expression
             yyscanner, OP_STARTSWITH, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _ISTARTSWITH_ primary_expression
       {
@@ -1380,6 +1416,7 @@ expression
             yyscanner, OP_ISTARTSWITH, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _ENDSWITH_ primary_expression
       {
@@ -1390,6 +1427,7 @@ expression
             yyscanner, OP_ENDSWITH, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _IENDSWITH_ primary_expression
       {
@@ -1400,6 +1438,7 @@ expression
             yyscanner, OP_IENDSWITH, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _IEQUALS_ primary_expression
       {
@@ -1410,6 +1449,7 @@ expression
             yyscanner, OP_IEQUALS, NULL));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | _STRING_IDENTIFIER_
       {
@@ -1424,6 +1464,7 @@ expression
         fail_if_error(result);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 1;
       }
     | _STRING_IDENTIFIER_ _AT_ primary_expression
       {
@@ -1438,6 +1479,7 @@ expression
 
         fail_if_error(result);
 
+        $$.required_strings.count = 1;
         $$.type = EXPRESSION_TYPE_BOOLEAN;
       }
     | _STRING_IDENTIFIER_ _IN_ range
@@ -1449,6 +1491,7 @@ expression
 
         fail_if_error(result);
 
+        $$.required_strings.count = 1;
         $$.type = EXPRESSION_TYPE_BOOLEAN;
       }
     | _FOR_ for_expression error
@@ -1691,6 +1734,7 @@ expression
         compiler->loop_index--;
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | for_expression _OF_ string_set
       {
@@ -1699,6 +1743,18 @@ expression
           yywarning(yyscanner,
             "expression always false - requesting %" PRId64 " of %" PRId64 ".", $1.value.integer, $3);
         }
+
+        if (($1.type == EXPRESSION_TYPE_INTEGER && $1.value.integer > 0) ||
+              ($1.type == EXPRESSION_TYPE_QUANTIFIER &&
+                  ($1.value.integer == FOR_EXPRESSION_ALL || $1.value.integer == FOR_EXPRESSION_ANY)))
+        {
+          $$.required_strings.count = 1;
+        }
+        else
+        {
+          $$.required_strings.count = 0;
+        }
+
         yr_parser_emit_with_arg(yyscanner, OP_OF, OF_STRING_SET, NULL, NULL);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
@@ -1713,6 +1769,7 @@ expression
         yr_parser_emit_with_arg(yyscanner, OP_OF, OF_RULE_SET, NULL, NULL);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression '%' _OF_ string_set
       {
@@ -1729,6 +1786,15 @@ expression
               compiler, "percentage must be between 1 and 100 (inclusive)");
 
           fail_with_error(ERROR_INVALID_PERCENTAGE);
+        }
+
+        if (!IS_UNDEFINED($1.value.integer))
+        {
+          $$.required_strings.count = 1;
+        }
+        else
+        {
+          $$.required_strings.count = 0;
         }
 
         yr_parser_emit_with_arg(yyscanner, OP_OF_PERCENT, OF_STRING_SET, NULL, NULL);
@@ -1758,6 +1824,17 @@ expression
         {
           yywarning(yyscanner,
             "expression always false - requesting %" PRId64 " of %" PRId64 ".", $1.value.integer, $3);
+        }
+
+        if (($1.type == EXPRESSION_TYPE_INTEGER && $1.value.integer > 0) ||
+              ($1.type == EXPRESSION_TYPE_QUANTIFIER &&
+                  ($1.value.integer == FOR_EXPRESSION_ALL || $1.value.integer == FOR_EXPRESSION_ANY)))
+        {
+          $$.required_strings.count = 1;
+        }
+        else
+        {
+          $$.required_strings.count = 0;
         }
 
         yr_parser_emit(yyscanner, OP_OF_FOUND_IN, NULL);
@@ -1797,6 +1874,17 @@ expression
             "multiple strings at an offset is usually false.");
         }
 
+        if (($1.type == EXPRESSION_TYPE_INTEGER && $1.value.integer > 0) ||
+              ($1.type == EXPRESSION_TYPE_QUANTIFIER &&
+                  ($1.value.integer == FOR_EXPRESSION_ALL || $1.value.integer == FOR_EXPRESSION_ANY)))
+        {
+          $$.required_strings.count = 1;
+        }
+        else
+        {
+          $$.required_strings.count = 0;
+        }
+
         yr_parser_emit(yyscanner, OP_OF_FOUND_AT, NULL);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
@@ -1806,11 +1894,13 @@ expression
         yr_parser_emit(yyscanner, OP_NOT, NULL);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | _DEFINED_ boolean_expression
       {
         yr_parser_emit(yyscanner, OP_DEFINED, NULL);
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | boolean_expression _AND_
       {
@@ -1856,6 +1946,7 @@ expression
         yr_free(fixup);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = $4.required_strings.count + $1.required_strings.count;
       }
     | boolean_expression _OR_
       {
@@ -1900,6 +1991,13 @@ expression
         yr_free(fixup);
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+
+        // Set required string count to minimum from both parts
+        if ($1.required_strings.count > $4.required_strings.count) {
+          $$.required_strings.count = $4.required_strings.count;
+        } else {
+          $$.required_strings.count = $1.required_strings.count;
+        }
       }
     | primary_expression _LT_ primary_expression
       {
@@ -1907,6 +2005,7 @@ expression
             yyscanner, "<", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _GT_ primary_expression
       {
@@ -1914,6 +2013,7 @@ expression
             yyscanner, ">", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _LE_ primary_expression
       {
@@ -1921,6 +2021,7 @@ expression
             yyscanner, "<=", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _GE_ primary_expression
       {
@@ -1928,6 +2029,7 @@ expression
             yyscanner, ">=", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _EQ_ primary_expression
       {
@@ -1935,6 +2037,7 @@ expression
             yyscanner, "==", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression _NEQ_ primary_expression
       {
@@ -1942,6 +2045,7 @@ expression
             yyscanner, "!=", $1, $3));
 
         $$.type = EXPRESSION_TYPE_BOOLEAN;
+        $$.required_strings.count = 0;
       }
     | primary_expression
       {
@@ -2112,7 +2216,11 @@ iterator
         if (loop_ctx->vars_count == 1)
         {
           loop_ctx->vars[0].type = $1.type;
-          loop_ctx->vars[0].value.integer = YR_UNDEFINED;
+
+          if ($1.type == EXPRESSION_TYPE_STRING)
+            loop_ctx->vars[0].value.sized_string_ref = YR_ARENA_NULL_REF;
+          else
+            loop_ctx->vars[0].value.integer = YR_UNDEFINED;
         }
         else
         {
@@ -2148,7 +2256,6 @@ set
         }
 
         $$.type = $2.type;
-
       }
     | range
       {

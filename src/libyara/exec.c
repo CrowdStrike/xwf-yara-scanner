@@ -131,7 +131,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
           offset <= block->base + block->size - sizeof(type))     \
       {                                                           \
         type result;                                              \
-        const uint8_t* data = block->fetch_data(block);           \
+        const uint8_t* data = yr_fetch_block_data(block);         \
         if (data == NULL)                                         \
           return YR_UNDEFINED;                                    \
         result = *(type*) (data + offset - block->base);          \
@@ -1166,13 +1166,28 @@ int yr_execute_code(YR_SCAN_CONTEXT* context)
 
       current_rule = &context->rules->rules_table[current_rule_idx];
 
-      // If the rule is disabled let's skip its code.
-      ip = jmp_if(RULE_IS_DISABLED(current_rule), ip);
+      // If the rule is disabled, let's skip its code.
+      bool skip_rule = RULE_IS_DISABLED(current_rule);
 
-      // Skip the bytes corresponding to the rule's index, but only if not
-      // taking the jump.
-      if (!RULE_IS_DISABLED(current_rule))
+      // The rule is also skipped if it is not required to be evaluated.
+      skip_rule |= yr_bitmask_is_not_set(
+          context->required_eval, current_rule_idx);
+
+      ip = jmp_if(skip_rule, ip);
+
+      if (skip_rule)
+      {
+        // If the rule is skipped it is false, and if a global rule is false
+        // we must mark its namespace as unsatisfied.
+        if (RULE_IS_GLOBAL(current_rule))
+          yr_bitmask_set(context->ns_unsatisfied_flags, current_rule->ns->idx);
+      }
+      else
+      {
+        // If not taking the jump, skip the bytes corresponding to the
+        // rule's index.
         ip += sizeof(uint32_t);
+      }
 
       break;
 
