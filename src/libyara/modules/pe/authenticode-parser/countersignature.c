@@ -357,7 +357,6 @@ int IMPL_FUNC_NAME(verify_digest, pkcs7)(
 
     X509_STORE* store = X509_STORE_new();
     TS_VERIFY_CTX* ctx = TS_VERIFY_CTX_new();
-    TS_VERIFY_CTX_init(ctx);
 
     TS_VERIFY_CTX_set_flags(ctx, TS_VFY_VERSION | TS_VFY_IMPRINT);
     TS_VERIFY_CTX_set_store(ctx, store);
@@ -457,6 +456,9 @@ CountersignatureImpl* ms_countersig_impl_new(const uint8_t* data, long size)
         result->funcs = &FUNC_ARRAY_NAME_FOR_IMPL(pkcs7);
         result->pkcs7 = p7;
         return result;
+    } else if (p7) {
+        PKCS7_free(p7);
+        return NULL;
     }
 
     d = data;
@@ -527,6 +529,16 @@ Countersignature* ms_countersig_new(const uint8_t* data, long size, ASN1_STRING*
     }
 
     STACK_OF(X509)* certs = impl->funcs->get_certs(impl);
+
+    /* MS Counter signatures (PKCS7/CMS) can have extra certificates that are not part of a chain */
+    result->certs = certificate_array_new(sk_X509_num(certs));
+    if (!result->certs) {
+        result->verify_flags = AUTHENTICODE_VFY_INTERNAL_ERROR;
+        goto end;
+    }
+
+    parse_x509_certificates(certs, result->certs);
+
     result->chain = parse_signer_chain(signCert, certs);
 
     /* Imprint == digest */
@@ -642,6 +654,7 @@ void countersignature_free(Countersignature* sig)
         free(sig->digest_alg);
         free(sig->digest.data);
         certificate_array_free(sig->chain);
+        certificate_array_free(sig->certs);
         free(sig);
     }
 }

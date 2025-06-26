@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
-// YARA Scanner X-Tension Version 1.4
-// Based on YARA 4.5.0 API
+// YARA Scanner X-Tension Version 1.5
+// Based on YARA 4.5.4 API
 // Written by Chris Mayhew & Joe Duin - CrowdStrike
 // Thank you to the team at CrowdStrike for helping to build and troubleshoot
 // Copyright 2025 CrowdStrike, Inc.
@@ -438,7 +438,7 @@ XT_About(
 ) noexcept
 {
 	wstring result(YR_VERSION_w);
-	auto yara_version = L"YARA X-Tension V1.4 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA " + result;
+	auto yara_version = L"YARA X-Tension V1.5 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA " + result;
 	XWF_OutputMessage(yara_version.c_str(), 1);
 	return 0;
 }
