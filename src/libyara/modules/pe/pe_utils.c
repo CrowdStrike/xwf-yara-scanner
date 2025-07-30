@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdio.h>
 #include <string.h>
+#include <yara/dotnet.h>
 #include <yara/endian.h>
 #include <yara/integers.h>
 #include <yara/mem.h>
@@ -36,7 +37,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <yara/pe_utils.h>
 #include <yara/strutils.h>
 #include <yara/utils.h>
-#include <yara/dotnet.h>
 
 PIMAGE_NT_HEADERS32 pe_get_header(const uint8_t* data, size_t data_size)
 {
@@ -62,7 +62,7 @@ PIMAGE_NT_HEADERS32 pe_get_header(const uint8_t* data, size_t data_size)
   if (data_size < headers_size)
     return NULL;
 
-  pe_header = (PIMAGE_NT_HEADERS32)(data + yr_le32toh(mz_header->e_lfanew));
+  pe_header = (PIMAGE_NT_HEADERS32) (data + yr_le32toh(mz_header->e_lfanew));
 
   if (yr_le32toh(pe_header->Signature) != IMAGE_NT_SIGNATURE)
     return NULL;
@@ -81,29 +81,17 @@ PIMAGE_NT_HEADERS32 pe_get_header(const uint8_t* data, size_t data_size)
   return pe_header;
 }
 
-
 PIMAGE_DATA_DIRECTORY pe_get_directory_entry(PE* pe, int entry)
 {
-  // Explanation
-  // https://github.com/VirusTotal/yara/issues/1525
-
-  // In Windows, any access to data directories is controlled by the
-  // RtlImageDirectoryEntryToData function. This is one of the first checks
-  // whether the desired directory entry is smaller than NumberOfRvaAndSizes.
-  // If it's not, it means that the requested directory entry is not there.
-  //
-  //  1. Must NOT check whether NumberOfRvaAndSizes > 0x10
-  //
-  //  2. Must check for NumberOfRvaAndSizes < DataDirectory except for 
-  //     IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR for 32-bit binary
-  //
-  //  3. The function must NOT check for SizeOfOptionalHeader
-
-
-  if ((entry != IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR || IS_64BITS_PE(pe)) &&
-      OptionalHeader(pe, NumberOfRvaAndSizes) < entry)
-    return NULL;
-
+  // In theory, `entry` should be lower than NumberOfRvaAndSizes, however,
+  // we don't enforce it because some PE files have a NumberOfRvaAndSizes
+  // values lower than the actual number of directory entries. For example,
+  // file 0aa527fd26c8e7fa7f3476b6d7eb8f22c071ff4c0fd3ed3797fa90ceb80f24ce
+  // has NumberOfRvaAndSizes set to 0, but it actually has directory
+  // entries. If we are overly strict here, and only parse entries which are
+  // less than NumberOfRvaAndSizes, we run the risk of missing otherwise
+  // perfectly valid files (valid in the sense that they can be parsed, even
+  // if they are not valid for the Windows loader).
   PIMAGE_DATA_DIRECTORY result = &OptionalHeader(pe, DataDirectory)[entry];
 
   // Check that directory is in file
@@ -112,7 +100,6 @@ PIMAGE_DATA_DIRECTORY pe_get_directory_entry(PE* pe, int entry)
 
   return result;
 }
-
 
 int64_t pe_rva_to_offset(PE* pe, uint64_t rva)
 {
@@ -141,10 +128,16 @@ int64_t pe_rva_to_offset(PE* pe, uint64_t rva)
         lowest_section_rva = yr_le32toh(section->VirtualAddress);
       }
 
-      uint32_t virtualSize = yr_le32toh(
-          section->Misc.VirtualSize != 0 ?
-          section->Misc.VirtualSize :
-          section->SizeOfRawData);
+      // In theory, we should use the section's virtual size while
+      // checking if some RVA is within the section. In most cases
+      // the virtual size is greater than the raw data size, but that's
+      // not always the case. So we use the larger of the two values.
+      //
+      // Example:
+      // db6a9934570fa98a93a979e7e0e218e0c9710e5a787b18c6948f2eedd9338984
+      uint32_t virtualSize = yr_max(
+          yr_le32toh(section->Misc.VirtualSize),
+          yr_le32toh(section->SizeOfRawData));
 
       if (rva >= yr_le32toh(section->VirtualAddress) &&
           rva - yr_le32toh(section->VirtualAddress) < virtualSize &&
@@ -176,10 +169,10 @@ int64_t pe_rva_to_offset(PE* pe, uint64_t rva)
             section_offset -= rest;
         }
 
-        // For multi-section images, real pointer to raw data is aligned down to sector size
+        // For multi-section images, real pointer to raw data is aligned down to
+        // sector size
         if (yr_le32toh(OptionalHeader(pe, SectionAlignment)) >= PE_PAGE_SIZE)
           section_offset = section_offset & ~(PE_SECTOR_SIZE - 1);
-
       }
 
       section++;
@@ -217,7 +210,6 @@ int64_t pe_rva_to_offset(PE* pe, uint64_t rva)
   return result;
 }
 
-
 #if !HAVE_TIMEGM
 #if HAVE__MKGMTIME
 #define timegm _mkgmtime
@@ -230,7 +222,6 @@ static bool is_leap(unsigned int year)
   year += 1900;
   return (year % 4) == 0 && ((year % 100) != 0 || (year % 400) == 0);
 }
-
 
 time_t timegm(struct tm* tm)
 {
@@ -258,7 +249,6 @@ time_t timegm(struct tm* tm)
 
 #endif  // HAVE__MKGMTIME
 #endif  // !HAVE_TIMEGM
-
 
 // These ordinals are taken from pefile. If a lookup fails attempt to return
 // "ordN" and if that fails, return NULL. The caller is responsible for freeing

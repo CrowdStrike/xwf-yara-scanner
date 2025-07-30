@@ -36,10 +36,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "utils.h"
 
-// Maximum length of file paths. This is the only limit that doesn't have the
-// YR_ prefix. The intention is using the default MAX_PATH if defined.
-#ifndef MAX_PATH
-#define MAX_PATH 1024
+// Maximum length of file paths.
+#ifndef YR_MAX_PATH
+#define YR_MAX_PATH 4096
 #endif
 
 // Maximum number of threads that can use a YR_RULES structure simultaneously.
@@ -114,8 +113,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define YR_MAX_STRING_MATCHES 1000000
 #endif
 
-// The number of matches before detecting slow scanning. If more matches are found
-// the scan will have a CALLBACK_MSG_TOO_SLOW_SCANNING.
+// The number of matches before detecting slow scanning. If more matches are
+// found the scan will have a CALLBACK_MSG_TOO_SLOW_SCANNING.
 #ifndef YR_SLOW_STRING_MATCHES
 #define YR_SLOW_STRING_MATCHES 600000
 #endif
@@ -172,7 +171,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Maximum input size scanned by yr_re_exec and yr_re_fast_exec
 #ifndef YR_RE_SCAN_LIMIT
-#define YR_RE_SCAN_LIMIT 4096
+#define YR_RE_SCAN_LIMIT 1024
 #endif
 
 // Maximum number of fibers

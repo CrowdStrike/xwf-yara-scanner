@@ -39,6 +39,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <yara/dotnet.h>
 #include <yara/endian.h>
+#include <yara/limits.h>
 #include <yara/mem.h>
 #include <yara/modules.h>
 #include <yara/pe.h>
@@ -204,19 +205,6 @@ static void pe_parse_rich_signature(PE* pe, uint64_t base_address)
   if (rich_signature == NULL)
     return;
 
-  // The three key values must all be equal and the first dword
-  // XORs to "DanS". Then walk the buffer looking for "Rich" which marks the
-  // end. Technically the XOR key should be right after "Rich" but it's not
-  // important.
-
-  if (yr_le32toh(rich_signature->key1) != yr_le32toh(rich_signature->key2) ||
-      yr_le32toh(rich_signature->key2) != yr_le32toh(rich_signature->key3) ||
-      (yr_le32toh(rich_signature->dans) ^ yr_le32toh(rich_signature->key1)) !=
-          RICH_DANS)
-  {
-    return;
-  }
-
   // Multiply by 4 because we are counting in DWORDs.
   rich_len = (rich_ptr - (DWORD*) rich_signature) * 4;
   raw_data = (BYTE*) yr_malloc(rich_len);
@@ -232,9 +220,7 @@ static void pe_parse_rich_signature(PE* pe, uint64_t base_address)
       "rich_signature.offset");
 
   yr_set_integer(rich_len, pe->object, "rich_signature.length");
-
-  yr_set_integer(
-      yr_le32toh(rich_signature->key1), pe->object, "rich_signature.key");
+  yr_set_integer(yr_le32toh(key), pe->object, "rich_signature.key");
 
   clear_data = (BYTE*) yr_malloc(rich_len);
 
@@ -251,7 +237,7 @@ static void pe_parse_rich_signature(PE* pe, uint64_t base_address)
        rich_ptr < (DWORD*) (clear_data + rich_len);
        rich_ptr++)
   {
-    *rich_ptr ^= rich_signature->key1;
+    *rich_ptr ^= key;
   }
 
   yr_set_sized_string(
@@ -381,9 +367,9 @@ static void pe_parse_debug_directory(PE* pe)
     if (pdb_path != NULL)
     {
       pdb_path_len = strnlen(
-          pdb_path, yr_min(available_space(pe, pdb_path), MAX_PATH));
+          pdb_path, yr_min(available_space(pe, pdb_path), YR_MAX_PATH));
 
-      if (pdb_path_len > 0 && pdb_path_len < MAX_PATH)
+      if (pdb_path_len >= 0 && pdb_path_len < YR_MAX_PATH)
       {
         yr_set_sized_string(pdb_path, pdb_path_len, pe->object, "pdb_path");
         break;
@@ -395,7 +381,6 @@ static void pe_parse_debug_directory(PE* pe)
 // Return a pointer to the resource directory string or NULL.
 // The callback function will parse this and call yr_set_sized_string().
 // The pointer is guaranteed to have enough space to contain the entire string.
-
 static const PIMAGE_RESOURCE_DIR_STRING_U parse_resource_name(
     PE* pe,
     const uint8_t* rsrc_data,
@@ -412,8 +397,11 @@ static const PIMAGE_RESOURCE_DIR_STRING_U parse_resource_name(
 
     // A resource directory string is 2 bytes for the length and then a variable
     // length Unicode string. Make sure we have at least 2 bytes.
-
     if (!fits_in_pe(pe, pNameString, 2))
+      return NULL;
+
+    // Sanity check for strings that are excesively large.
+    if (pNameString->Length > 1000)
       return NULL;
 
     // Move past the length and make sure we have enough bytes for the string.
@@ -466,13 +454,14 @@ static int _pe_iterate_resources(
 
   entry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) (resource_dir + 1);
 
+  if (!fits_in_pe(
+          pe, entry, total_entries * sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)))
+    return result;
+
   for (i = 0; i < total_entries; i++)
   {
-    if (!struct_fits_in_pe(pe, entry, IMAGE_RESOURCE_DIRECTORY_ENTRY))
-    {
-      result = RESOURCE_ITERATOR_ABORTED;
-      break;
-    }
+    if (yr_le32toh(entry->OffsetToData) == 0)
+      continue;
 
     switch (rsrc_tree_level)
     {
@@ -511,10 +500,6 @@ static int _pe_iterate_resources(
             callback,
             callback_data);
       }
-      else
-      {
-        result = RESOURCE_ITERATOR_ABORTED;
-      }
     }
     else
     {
@@ -523,22 +508,26 @@ static int _pe_iterate_resources(
 
       if (struct_fits_in_pe(pe, data_entry, IMAGE_RESOURCE_DATA_ENTRY))
       {
-        if (callback(
-                data_entry,
-                *type,
-                *id,
-                *language,
-                type_string,
-                name_string,
-                lang_string,
-                callback_data) == RESOURCE_CALLBACK_ABORT)
+        if (yr_le32toh(data_entry->Size) > 0 &&
+            // We could use the PE's size as an upper bound for the entry size,
+            // but there are some truncated files where the PE size is lower.
+            // Use a reasonably large value as the upper bound and avoid some
+            // completely corrupt entries with random values.
+            yr_le32toh(data_entry->Size) <= 0x3FFFFFFF)
         {
-          result = RESOURCE_ITERATOR_ABORTED;
+          if (callback(
+                  data_entry,
+                  *type,
+                  *id,
+                  *language,
+                  type_string,
+                  name_string,
+                  lang_string,
+                  callback_data) == RESOURCE_CALLBACK_ABORT)
+          {
+            result = RESOURCE_ITERATOR_ABORTED;
+          }
         }
-      }
-      else
-      {
-        result = RESOURCE_ITERATOR_ABORTED;
       }
     }
 
@@ -741,7 +730,8 @@ static void pe_set_resource_string_or_id(
   }
   else
   {
-    yr_set_integer(rsrc_int, pe->object, int_description, pe->resources);
+    if (rsrc_int != -1)
+      yr_set_integer(rsrc_int, pe->object, int_description, pe->resources);
   }
 }
 
@@ -756,7 +746,7 @@ static int pe_collect_resources(
     PE* pe)
 {
   // Don't collect too many resources.
-  if (pe->resources > MAX_RESOURCES)
+  if (pe->resources >= MAX_RESOURCES)
     return RESOURCE_CALLBACK_CONTINUE;
 
   yr_set_integer(
@@ -859,7 +849,8 @@ static IMPORT_FUNCTION* pe_parse_import_descriptor(
 
     while (struct_fits_in_pe(pe, thunks64, IMAGE_THUNK_DATA64) &&
            yr_le64toh(thunks64->u1.Ordinal) != 0 &&
-           parsed_imports < MAX_PE_IMPORTS)
+           parsed_imports < MAX_PE_IMPORTS &&
+           *num_function_imports < MAX_PE_IMPORTS)
     {
       char* name = NULL;
       uint16_t ordinal = 0;
@@ -888,11 +879,15 @@ static IMPORT_FUNCTION* pe_parse_import_descriptor(
       }
       else
       {
-        // If imported by ordinal. Lookup the ordinal.
-        name = ord_lookup(dll_name, yr_le64toh(thunks64->u1.Ordinal) & 0xFFFF);
-        // Also store the ordinal.
-        ordinal = yr_le64toh(thunks64->u1.Ordinal) & 0xFFFF;
-        has_ordinal = 1;
+        // The maximum possible value for the ordinal is when the high
+        // bit is set (indicating import by ordinal) and the low bits
+        // are FFFF. The maximum number of ordinal exports is 65536.
+        if (yr_le64toh(thunks64->u1.Ordinal) <= 0x800000000000ffff)
+        {
+          ordinal = yr_le64toh(thunks64->u1.Ordinal) & 0xFFFF;
+          name = ord_lookup(dll_name, ordinal);
+          has_ordinal = 1;
+        }
       }
 
       rva_address = yr_le32toh(import_descriptor->FirstThunk) +
@@ -945,6 +940,7 @@ static IMPORT_FUNCTION* pe_parse_import_descriptor(
 
     while (struct_fits_in_pe(pe, thunks32, IMAGE_THUNK_DATA32) &&
            yr_le32toh(thunks32->u1.Ordinal) != 0 &&
+           parsed_imports < MAX_PE_IMPORTS &&
            *num_function_imports < MAX_PE_IMPORTS)
     {
       char* name = NULL;
@@ -974,11 +970,15 @@ static IMPORT_FUNCTION* pe_parse_import_descriptor(
       }
       else
       {
-        // If imported by ordinal. Lookup the ordinal.
-        name = ord_lookup(dll_name, yr_le32toh(thunks32->u1.Ordinal) & 0xFFFF);
-        // Also store the ordinal.
-        ordinal = yr_le32toh(thunks32->u1.Ordinal) & 0xFFFF;
-        has_ordinal = 1;
+        // The maximum possible value for the ordinal is when the high
+        // bit is set (indicating import by ordinal) and the low bits
+        // are FFFF. The maximum number of ordinal exports is 65536.
+        if (yr_le32toh(thunks32->u1.Ordinal) <= 0x8000ffff)
+        {
+          ordinal = yr_le32toh(thunks32->u1.Ordinal) & 0xFFFF;
+          name = ord_lookup(dll_name, ordinal);
+          has_ordinal = 1;
+        }
       }
 
       rva_address = yr_le32toh(import_descriptor->FirstThunk) +
@@ -1029,9 +1029,9 @@ static IMPORT_FUNCTION* pe_parse_import_descriptor(
 }
 
 //
-// In Windows PE files, any character including 0x20 and above is allowed.
-// The only exceptions are characters that are invalid for file names in
-// Windows, which are "*<>?|. While they still can be present in the import
+// In Windows PE files, any printable character including 0x20 and above is
+// allowed. The only exceptions are characters that are invalid for file names
+// in Windows, which are "*<>?|. While they still can be present in the import
 // directory, such module can never be present in Windows, so we can treat them
 // as invalid.
 //
@@ -1061,8 +1061,8 @@ static int pe_valid_dll_name(const char* dll_name, size_t n)
 
   while (l < n && *c != '\0')
   {
-    if (*c < ' ' || *c == '\"' || *c == '*' || *c == '<' || *c == '>' ||
-        *c == '?' || *c == '|')
+    if (*c < ' ' || *c > 0x7e || *c == '\"' || *c == '*' || *c == '<' ||
+        *c == '>' || *c == '?' || *c == '|')
     {
       return false;
     }
@@ -1288,6 +1288,10 @@ uint64_t pe_parse_delay_import_pointer(
     uint64_t rva)
 {
   const int64_t offset = pe_rva_to_offset(pe, rva);
+
+  if (offset < 0)
+    return YR_UNDEFINED;
+
   const uint8_t* data = pe->data + offset;
 
   if (!fits_in_pe(pe, data, pointerSize))
@@ -1428,17 +1432,8 @@ static void* pe_parse_delayed_imports(PE* pe)
       if (nameAddress == 0 || funcAddress == 0)
         break;
 
-      IMPORT_FUNCTION* imported_func = (IMPORT_FUNCTION*) yr_malloc(
-          sizeof(IMPORT_FUNCTION));
-
-      if (imported_func == NULL)
-        continue;
-
-      imported_func->name = NULL;
-      imported_func->has_ordinal = 0;
-      imported_func->ordinal = 0;
-      imported_func->rva = 0;
-      imported_func->next = NULL;
+      char* func_name;
+      uint8_t has_ordinal = 0;
 
       // Check name address. It could be ordinal, VA or RVA
       if (!(nameAddress & ordinal_mask))
@@ -1450,21 +1445,35 @@ static void* pe_parse_delayed_imports(PE* pe)
 
         offset = pe_rva_to_offset(pe, nameAddress + sizeof(uint16_t));
 
-        imported_func->name = (char*) yr_strndup(
+        if (offset < 0)
+        {
+          name_rva += pointer_size;
+          func_rva += pointer_size;
+          continue;
+        }
+
+        func_name = (char*) yr_strndup(
             (char*) (pe->data + offset),
             yr_min(available_space(pe, (char*) (pe->data + offset)), 512));
       }
       else
       {
         // If imported by ordinal. Lookup the ordinal.
-        imported_func->name = ord_lookup(dll_name, nameAddress & 0xFFFF);
-
-        // Also store the ordinal.
-        imported_func->ordinal = nameAddress & 0xFFFF;
-        imported_func->has_ordinal = 1;
+        func_name = ord_lookup(dll_name, nameAddress & 0xFFFF);
+        has_ordinal = 1;
       }
 
+      IMPORT_FUNCTION* imported_func = (IMPORT_FUNCTION*) yr_malloc(
+          sizeof(IMPORT_FUNCTION));
+
+      if (imported_func == NULL)
+        break;
+
+      imported_func->name = func_name;
       imported_func->rva = func_rva;
+      imported_func->has_ordinal = has_ordinal;
+      imported_func->ordinal = (has_ordinal) ? nameAddress & 0xFFFF : 0;
+      imported_func->next = NULL;
 
       num_function_imports++;
       name_rva += pointer_size;
@@ -1762,6 +1771,22 @@ void _process_authenticode(
   for (size_t i = 0; i < auth_array->count; ++i)
   {
     const Authenticode* authenticode = auth_array->signatures[i];
+
+    if (authenticode->verify_flags == AUTHENTICODE_VFY_CANT_PARSE)
+      continue;
+
+    if (authenticode->verify_flags == AUTHENTICODE_VFY_WRONG_PKCS7_TYPE)
+      continue;
+
+    if (authenticode->verify_flags == AUTHENTICODE_VFY_NO_SIGNER_INFO)
+      continue;
+
+    if (authenticode->verify_flags == AUTHENTICODE_VFY_NO_SIGNER_CERT)
+      continue;
+
+    if (authenticode->verify_flags == AUTHENTICODE_VFY_INTERNAL_ERROR)
+      continue;
+
     bool verified = authenticode->verify_flags == AUTHENTICODE_VFY_VALID;
 
     /* If any signature is valid -> file is correctly signed */
@@ -2031,15 +2056,20 @@ const char* pe_get_section_full_name(
   // Check string
   for (uint64_t len = 0; fits_in_pe(pe, string, len + 1); len++)
   {
+    // Prevent sign extension to 32-bits on bytes > 0x7F
+    // The result negative integer would cause assert in MSVC debug version of
+    // isprint()
+    unsigned int one_char = (unsigned char) (string[len]);
+
     // Valid string
-    if (string[len] == 0)
+    if (one_char == 0)
     {
       *section_full_name_length = len;
       return string;
     }
 
     // string contain unprintable character
-    if (!isprint(string[len]))
+    if (!isprint(one_char))
       return NULL;
   }
 
@@ -2053,7 +2083,10 @@ static void pe_parse_header(PE* pe, uint64_t base_address, int flags)
   PIMAGE_DATA_DIRECTORY data_dir;
 
   char section_name[IMAGE_SIZEOF_SHORT_NAME + 1];
-  int sect_name_length, scount, ddcount;
+  int sect_name_length;
+
+  uint16_t scount;
+  uint32_t ddcount;
 
   uint64_t highest_sec_siz = 0;
   uint64_t highest_sec_ofs = 0;
@@ -3345,7 +3378,7 @@ define_function(is_64bit)
 // Returns the number of rich signatures that match the specified version and
 // toolid numbers.
 //
-static uint64_t _rich_version(
+static int64_t _rich_version(
     YR_OBJECT* module,
     uint64_t version,
     uint64_t toolid)
@@ -3356,7 +3389,7 @@ static uint64_t _rich_version(
   PRICH_SIGNATURE clear_rich_signature;
   SIZED_STRING* rich_string;
 
-  uint64_t result = 0;
+  int64_t result = 0;
 
   // Check if the required fields are set
   if (yr_is_undefined(module, "rich_signature.length"))
@@ -3365,17 +3398,22 @@ static uint64_t _rich_version(
   rich_length = yr_get_integer(module, "rich_signature.length");
   rich_string = yr_get_string(module, "rich_signature.clear_data");
 
-  // If the clear_data was not set, return YR_UNDEFINED
+  // If clear_data was not set, return YR_UNDEFINED
   if (rich_string == NULL)
     return YR_UNDEFINED;
 
+  // File e77b007c9a964411c5e33afeec18be32c86963b78f3c3e906b28fcf1382f46c3
+  // has a Rich header of length 8, which is smaller than RICH_SIGNATURE and
+  // causes a crash.
+  if (rich_length < sizeof(RICH_SIGNATURE))
+    return YR_UNDEFINED;
+
   if (version == YR_UNDEFINED && toolid == YR_UNDEFINED)
-    return false;
+    return 0;
 
   clear_rich_signature = (PRICH_SIGNATURE) rich_string->c_string;
 
   // Loop over the versions in the rich signature
-
   rich_count = (rich_length - sizeof(RICH_SIGNATURE)) /
                sizeof(RICH_VERSION_INFO);
 

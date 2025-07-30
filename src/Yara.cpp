@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////////////////////////////
-// YARA Scanner X-Tension Version 1.3
-// Based on YARA 4.3.2 API
+// YARA Scanner X-Tension Version 1.5
+// Based on YARA 4.5.4 API
 // Written by Chris Mayhew & Joe Duin - CrowdStrike
 // Thank you to the team at CrowdStrike for helping to build and troubleshoot
-// Copyright 2023 CrowdStrike, Inc.
+// Copyright 2025 CrowdStrike, Inc.
 ///////////////////////////////////////////////////////////////////////////////
 #include "X-Tension.h"
 #include <yara.h>
@@ -222,7 +222,7 @@ XT_Init(
 	mbstowcs_s(NULL, YR_VERSION_w, strlen(YR_VERSION) + 1, YR_VERSION, strlen(YR_VERSION));
 
 	// Don't do anything else if XWF is doing a quick check
-	if (g_nOpTypeBackup_init < XT_INIT_QUICKCHECK)
+	if (g_nOpTypeBackup_init != XT_INIT_QUICKCHECK)
 	{
 		// Initialize YARA library
 		auto yrInitSuccess = yr_initialize();
@@ -438,7 +438,7 @@ XT_About(
 ) noexcept
 {
 	wstring result(YR_VERSION_w);
-	auto yara_version = L"YARA X-Tension V1.3 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA " + result;
+	auto yara_version = L"YARA X-Tension V1.5 written by Chris Mayhew & Joe Duin - CrowdStrike. Based on YARA " + result;
 	XWF_OutputMessage(yara_version.c_str(), 1);
 	return 0;
 }
